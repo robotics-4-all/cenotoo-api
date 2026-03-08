@@ -5,14 +5,14 @@ Covers:
 - services/organization_service.py
 
 Each service function has at least one happy-path and one error-path test.
-All external dependencies (utilities, docker, etc.) are mocked at the
+All external dependencies (utilities, etc.) are mocked at the
 service module namespace level.
 """
 
 import uuid
 from collections import namedtuple
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -89,7 +89,6 @@ class TestCreateCollectionService:
     """Tests for create_collection_service."""
 
     @patch("services.collection_service.insert_collection", new_callable=AsyncMock)
-    @patch("services.collection_service.docker_client")
     @patch("services.collection_service.create_kafka_topic", new_callable=AsyncMock)
     @patch("services.collection_service.create_cassandra_table", new_callable=AsyncMock)
     @patch("services.collection_service.get_project_by_id")
@@ -104,7 +103,6 @@ class TestCreateCollectionService:
         mock_get_proj,
         mock_create_table,
         mock_create_topic,
-        mock_docker,
         mock_insert,
     ):
         """Verify that a collection is created successfully when all conditions are met."""
@@ -130,7 +128,6 @@ class TestCreateCollectionService:
         assert str(_collection_id) in result["message"]
         mock_create_table.assert_awaited_once()
         mock_create_topic.assert_awaited_once()
-        mock_docker.containers.run.assert_called_once()
         mock_insert.assert_awaited_once()
 
     @patch("services.collection_service.contains_special_characters")
@@ -173,45 +170,6 @@ class TestCreateCollectionService:
             await create_collection_service(_org_id, _project_id, data)
         assert exc_info.value.status_code == 409
 
-    @patch("services.collection_service.docker_client")
-    @patch("services.collection_service.create_kafka_topic", new_callable=AsyncMock)
-    @patch("services.collection_service.create_cassandra_table", new_callable=AsyncMock)
-    @patch("services.collection_service.get_project_by_id")
-    @patch("services.collection_service.get_organization_by_id")
-    @patch("services.collection_service.fetch_collection_by_name", new_callable=AsyncMock)
-    @patch("services.collection_service.contains_special_characters")
-    async def test_docker_failure_raises_500(
-        self,
-        mock_special_chars,
-        mock_fetch,
-        mock_get_org,
-        mock_get_proj,
-        _mock_create_table,
-        _mock_create_topic,
-        mock_docker,
-    ):
-        """Verify that a Docker failure during collection creation raises a 500 error."""
-        from models.collection_models import CollectionCreateRequest
-        from services.collection_service import create_collection_service
-
-        mock_special_chars.return_value = False
-        mock_fetch.return_value = None
-        mock_get_org.return_value = _make_org_row()
-        mock_get_proj.return_value = _make_project_row()
-        mock_docker.containers.run.side_effect = Exception("Docker error")
-
-        data = CollectionCreateRequest(
-            name="my_collection",
-            description="desc",
-            tags=[],
-            collection_schema={"f": "text"},
-        )
-
-        with pytest.raises(HTTPException) as exc_info:
-            await create_collection_service(_org_id, _project_id, data)
-        assert exc_info.value.status_code == 500
-        assert "Failed to start consumer container" in exc_info.value.detail
-
 
 class TestUpdateCollectionService:
     """Tests for update_collection_service."""
@@ -235,7 +193,6 @@ class TestDeleteCollectionService:
     @patch("services.collection_service.delete_collection_from_db", new_callable=AsyncMock)
     @patch("services.collection_service.delete_kafka_topic", new_callable=AsyncMock)
     @patch("services.collection_service.delete_cassandra_table", new_callable=AsyncMock)
-    @patch("services.collection_service.docker_client")
     @patch("services.collection_service.get_collection_by_id")
     @patch("services.collection_service.get_project_by_id")
     @patch("services.collection_service.get_organization_by_id")
@@ -244,7 +201,6 @@ class TestDeleteCollectionService:
         mock_get_org,
         mock_get_proj,
         mock_get_coll,
-        mock_docker,
         mock_del_table,
         mock_del_topic,
         mock_del_db,
@@ -256,41 +212,12 @@ class TestDeleteCollectionService:
         mock_get_proj.return_value = _make_project_row()
         mock_get_coll.return_value = _make_collection_row()
 
-        mock_container = MagicMock()
-        mock_docker.containers.get.return_value = mock_container
-
         result = await delete_collection_service(_org_id, _project_id, _collection_id)
 
         assert result["message"] == "Collection deleted successfully"
-        mock_container.stop.assert_called_once()
-        mock_container.remove.assert_called_once()
         mock_del_table.assert_awaited_once()
         mock_del_topic.assert_awaited_once()
         mock_del_db.assert_awaited_once()
-
-    @patch("services.collection_service.docker_client")
-    @patch("services.collection_service.get_collection_by_id")
-    @patch("services.collection_service.get_project_by_id")
-    @patch("services.collection_service.get_organization_by_id")
-    async def test_docker_stop_failure_raises_500(
-        self,
-        mock_get_org,
-        mock_get_proj,
-        mock_get_coll,
-        mock_docker,
-    ):
-        """Verify that a Docker failure during collection deletion raises a 500 error."""
-        from services.collection_service import delete_collection_service
-
-        mock_get_org.return_value = _make_org_row()
-        mock_get_proj.return_value = _make_project_row()
-        mock_get_coll.return_value = _make_collection_row()
-        mock_docker.containers.get.side_effect = Exception("Container not found")
-
-        with pytest.raises(HTTPException) as exc_info:
-            await delete_collection_service(_org_id, _project_id, _collection_id)
-        assert exc_info.value.status_code == 500
-        assert "Failed to stop consumer container" in exc_info.value.detail
 
 
 class TestGetAllCollectionsService:

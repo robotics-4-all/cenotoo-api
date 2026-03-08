@@ -1,5 +1,5 @@
 """
-Shared test fixtures for the Nostradamus IoTO API test suite.
+Shared test fixtures for the Cenotoo API test suite.
 
 Provides:
 - Mocked Cassandra session (no real DB needed)
@@ -99,23 +99,11 @@ def _patch_kafka():
 
     with (
         patch("utilities.kafka_connector.get_kafka_admin_client", return_value=mock_admin),
+        patch("utilities.kafka_connector.get_kafka_producer", return_value=mock_producer),
         patch("utilities.kafka_topics.get_kafka_admin_client", return_value=mock_admin),
         patch("confluent_kafka.Producer", return_value=mock_producer),
     ):
         yield {"admin": mock_admin, "producer": mock_producer}
-
-
-# ---------------------------------------------------------------------------
-# Docker mock
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _patch_docker():
-    """Patch Docker client so no test interacts with real containers."""
-    mock_client = MagicMock()
-    with patch("docker.from_env", return_value=mock_client):
-        yield mock_client
 
 
 # ---------------------------------------------------------------------------

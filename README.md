@@ -1,10 +1,10 @@
-# Nostradamus IoTO API
+# Cenotoo API
 
-FastAPI REST service for IoT data ingestion, storage, and retrieval.
+FastAPI REST service for real-time data ingestion, storage, and retrieval.
 
-**Stack**: Python 3.11 / FastAPI / Cassandra / Kafka / Docker
+**Stack**: Python 3.11 / FastAPI / Cassandra / Kafka
 
-**Docs**: https://nostradamus-ioto.issel.ee.auth.gr/docs
+**Docs**: Available at `/docs` when running (Swagger UI)
 
 ## Quick Start
 
@@ -16,8 +16,8 @@ FastAPI REST service for IoT data ingestion, storage, and retrieval.
 ### Local Development
 
 ```bash
-git clone https://github.com/robotics-4-all/nostradamus-ioto-api.git
-cd nostradamus-ioto-api
+git clone https://github.com/robotics-4-all/cenotoo-api.git
+cd cenotoo-api
 
 python -m venv .venv
 source .venv/bin/activate
@@ -34,7 +34,7 @@ The API docs are at `http://localhost:8000/docs`.
 
 ### Docker Compose (Full Stack)
 
-Starts the API with Cassandra, Kafka, and Zookeeper:
+Starts the API with Cassandra and Kafka (KRaft mode, no ZooKeeper):
 
 ```bash
 cp .env.example .env
@@ -45,7 +45,7 @@ make up
 
 ```bash
 make build
-docker run -p 8000:8000 --env-file .env nostradamus-ioto-api
+docker run -p 8000:8000 --env-file .env cenotoo-api
 ```
 
 ## Make Targets
@@ -74,14 +74,20 @@ All configuration is via environment variables. See `.env.example` for the full 
 | `API_KEY_SECRET` | Yes (prod) | API key generation secret |
 | `ADMIN_USERNAME` | Yes | Admin login username |
 | `ADMIN_PASSWORD` | Yes | Admin login password |
-| `KAFKA_BROKERS` | No | Kafka broker addresses (default: `localhost:59498`) |
+| `KAFKA_BROKERS` | No | Kafka broker addresses (default: `localhost:9092`) |
+| `KAFKA_USERNAME` | No | Kafka SASL username (empty = no auth) |
+| `KAFKA_PASSWORD` | No | Kafka SASL password |
+| `KAFKA_SASL_MECHANISM` | No | SASL mechanism (default: `SCRAM-SHA-512`) |
+| `KAFKA_SECURITY_PROTOCOL` | No | Security protocol (default: `SASL_PLAINTEXT`) |
 | `CASSANDRA_CONTACT_POINTS` | No | Cassandra host (default: `localhost`) |
 | `CASSANDRA_PORT` | No | Cassandra port (default: `9042`) |
-| `NOSTRADAMUS_ORGANIZATION_ID` | No | Organization UUID |
+| `CASSANDRA_USERNAME` | No | Cassandra username (empty = no auth) |
+| `CASSANDRA_PASSWORD` | No | Cassandra password |
+| `ORGANIZATION_ID` | No | Organization UUID |
 | `RATE_LIMIT_DEFAULT` | No | Global rate limit (default: `120/minute`) |
 | `RATE_LIMIT_AUTH` | No | Auth endpoint rate limit (default: `10/minute`) |
 | `OTLP_ENDPOINT` | No | OpenTelemetry exporter endpoint (empty = disabled) |
-| `OTLP_SERVICE_NAME` | No | Service name for tracing (default: `nostradamus-ioto-api`) |
+| `OTLP_SERVICE_NAME` | No | Service name for tracing (default: `cenotoo-api`) |
 
 ## Project Structure
 
@@ -102,8 +108,8 @@ All configuration is via environment variables. See `.env.example` for the full 
 ├── routers/             # API route handlers
 ├── services/            # Business logic layer
 ├── models/              # Pydantic request/response models
-├── utilities/           # DB connectors, Kafka, Docker helpers
-└── tests/               # pytest test suite (188 tests)
+├── utilities/           # DB connectors, Kafka helpers
+└── tests/               # pytest test suite
 ```
 
 ## Testing
@@ -112,7 +118,7 @@ All configuration is via environment variables. See `.env.example` for the full 
 make test
 ```
 
-Tests mock Cassandra, Kafka, and Docker — no infrastructure required.
+Tests mock Cassandra and Kafka — no infrastructure required.
 
 ## Features
 
@@ -120,6 +126,7 @@ Tests mock Cassandra, Kafka, and Docker — no infrastructure required.
 - **OpenTelemetry Tracing**: Opt-in by setting `OTLP_ENDPOINT` (install extra: `pip install -e ".[tracing]"`)
 - **Pagination**: All list endpoints return `PaginatedResponse` with `items`, `total`, `offset`, `limit`
 - **API Versioning**: All endpoints under `/api/v1` prefix, ready for future versions
+- **SASL Authentication**: Kafka and Cassandra auth configured via environment variables
 
 ## Organization Setup Guide
 
@@ -133,7 +140,7 @@ Ensure the API and its infrastructure services (Cassandra, Kafka) are running an
 |----------|---------|
 | `ADMIN_USERNAME` | Admin account for initial authentication |
 | `ADMIN_PASSWORD` | Admin account password |
-| `NOSTRADAMUS_ORGANIZATION_ID` | UUID identifying the organization |
+| `ORGANIZATION_ID` | UUID identifying the organization |
 | `JWT_SECRET_KEY` | Secret for signing JWT tokens (must not be default in production) |
 | `API_KEY_SECRET` | Secret for API key generation (must not be default in production) |
 
@@ -169,18 +176,18 @@ Use the `access_token` in all subsequent requests via the `Authorization` header
 Confirm the organization is reachable:
 
 ```bash
-curl -X GET "$BASE_URL/api/v1/organization/nostradamus" \
+curl -X GET "$BASE_URL/api/v1/organization" \
   -H "Authorization: Bearer <token>"
 ```
 
 Optionally update the organization description and tags:
 
 ```bash
-curl -X PUT "$BASE_URL/api/v1/organization/nostradamus" \
+curl -X PUT "$BASE_URL/api/v1/organization" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "description": "Production IoT deployment",
+    "description": "Production data streaming deployment",
     "tags": ["iot", "sensors"]
   }'
 ```
@@ -249,7 +256,7 @@ API keys can be used for authentication via the `X-API-Key` header as an alterna
 
 ### Step 6 — Create a Collection
 
-Collections define the schema for ingested data. Each collection provisions a Cassandra table, a Kafka topic, and a Docker consumer container:
+Collections define the schema for ingested data. Each collection provisions a Cassandra table and a Kafka topic:
 
 ```bash
 curl -X POST "$BASE_URL/api/v1/projects/<project_id>/collections" \
@@ -327,3 +334,7 @@ Available statistics: `avg`, `max`, `min`, `sum`, `count`, `distinct`.
 All endpoints are under `/api/v1` except:
 - `GET /health` — liveness check
 - `GET /ready` — readiness check (Cassandra + Kafka)
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).

@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
-name = "nostradamus-ioto-api"
+name = "cenotoo-api"
 version = "1.0.1"
 description = "FastAPI REST service for IoT data ingestion, storage, and retrieval"
 readme = "README.md"
@@ -19,7 +19,6 @@ dependencies = [
     "kafka-python==2.0.2",
     "pydantic==2.7.2",
     "pydantic-settings==2.7.1",
-    "docker==7.1.0",
     "pandas==2.0.3",
     "python-dotenv>=1.0.0",
     "PyJWT>=2.8.0",

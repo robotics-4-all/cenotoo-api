@@ -4,6 +4,7 @@ This module provides a configured Cassandra session for database operations
 with the metadata keyspace.
 """
 
+from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import EXEC_PROFILE_DEFAULT, Cluster, ExecutionProfile
 from cassandra.policies import DCAwareRoundRobinPolicy, RetryPolicy
 
@@ -23,12 +24,20 @@ def get_cassandra_session():
         retry_policy=RetryPolicy(),  # Optional: Retry policy for failed requests
     )
 
-    cluster = Cluster(
-        [settings.cassandra_contact_points],
-        port=settings.cassandra_port,
-        protocol_version=5,
-        execution_profiles={EXEC_PROFILE_DEFAULT: execution_profile},
-    )
+    cluster_kwargs = {
+        "contact_points": [settings.cassandra_contact_points],
+        "port": settings.cassandra_port,
+        "protocol_version": 5,
+        "execution_profiles": {EXEC_PROFILE_DEFAULT: execution_profile},
+    }
+
+    if settings.cassandra_username:
+        cluster_kwargs["auth_provider"] = PlainTextAuthProvider(
+            username=settings.cassandra_username,
+            password=settings.cassandra_password,
+        )
+
+    cluster = Cluster(**cluster_kwargs)
     # Make sure the keyspace is set correctly
     session = cluster.connect("metadata")
     return session

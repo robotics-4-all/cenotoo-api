@@ -167,11 +167,11 @@ class TestSendDataEndpoint:
 
     @pytest.fixture(autouse=True)
     def _patch_router_deps(self, sample_org_id):
-        """Patch get_organization_id and the locally-imported Kafka Producer."""
+        """Patch get_organization_id and the Kafka producer factory."""
         mock_producer = MagicMock()
         with (
             patch("routers.send_data.get_organization_id", return_value=sample_org_id),
-            patch("routers.send_data.Producer", return_value=mock_producer),
+            patch("routers.send_data.get_kafka_producer", return_value=mock_producer),
         ):
             yield
 

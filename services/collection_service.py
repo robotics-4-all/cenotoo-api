@@ -1,9 +1,7 @@
 import uuid
 
-import docker
 from fastapi import HTTPException
 
-from config import settings
 from dependencies import contains_special_characters
 from models.collection_models import (
     CollectionCreateRequest,
@@ -25,8 +23,6 @@ from utilities.collection_utils import (
 )
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
-
-docker_client = docker.from_env()
 
 
 async def create_collection_service(
@@ -51,27 +47,6 @@ async def create_collection_service(
     project_name = get_project_by_id(project_id, organization_id).project_name
     await create_cassandra_table(organization_name, project_name, data)
     await create_kafka_topic(organization_name, project_name, data.name)
-    try:
-        container_name = f"{organization_name}_{project_name}_{data.name}_consumer"
-        docker_client.containers.run(
-            "kafka-to-cassandra",  # Updated to use the new image name
-            name=container_name,
-            environment={
-                "KAFKA_BOOTSTRAP_SERVERS": settings.kafka_brokers,
-                "CASSANDRA_CONTACT_POINTS": settings.cassandra_contact_points,
-                "CASSANDRA_PORT": settings.cassandra_port,
-                "COLLECTION_NAME": data.name,  # Just the collection name: test214
-                "PROJECT_NAME": project_name,  # Just the project name: test_special
-                # Just the organization name: test_nostradamus
-                "ORGANIZATION_NAME": organization_name,
-            },
-            detach=True,
-            restart_policy={"Name": "always"},
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to start consumer container: {str(e)}"
-        ) from e
     collection_id = await insert_collection(organization_id, project_id, data)
     return {"message": f"Collection {data.name} created successfully with ID {collection_id}"}
 
@@ -101,18 +76,6 @@ async def delete_collection_service(
     project_name = project.project_name
     collection_name = collection.collection_name
 
-    # Stop and remove the consumer container
-    try:
-        container_name = f"{organization_name}_{project_name}_{collection_name}_consumer"
-        container = docker_client.containers.get(container_name)
-        container.stop()
-        container.remove()
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to stop consumer container: {str(e)}"
-        ) from e
-
-    # Delete associated resources
     await delete_cassandra_table(organization_id, project_id, collection_id)
     await delete_kafka_topic(organization_name, project_name, collection_name)
     await delete_collection_from_db(collection_id)

@@ -20,7 +20,7 @@ TAG = "Organization Management"
 
 
 @router.get(
-    "/organization/nostradamus",
+    "/organization",
     tags=[TAG],
     response_model=OrganizationResponse,
     dependencies=[Depends(verify_user_belongs_to_organization)],
@@ -38,7 +38,7 @@ async def get_organization_info():
 # PUT: Update the current organization
 
 
-@router.put("/organization/nostradamus", tags=[TAG])
+@router.put("/organization", tags=[TAG])
 async def update_organization(data: OrganizationUpdateRequest):
     """Update the current organization.
 

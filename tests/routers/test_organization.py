@@ -34,7 +34,7 @@ class TestOrganizationEndpoints:
                 "tags": ["test"],
                 "creation_date": str(mock_org.creation_date),
             }
-            response = client.get("/api/v1/organization/nostradamus")
+            response = client.get("/api/v1/organization")
         assert response.status_code == 200
 
     def test_update_organization(self, client, sample_org_id):
@@ -48,7 +48,7 @@ class TestOrganizationEndpoints:
         ):
             mock_svc.return_value = {"message": "Organization updated successfully."}
             response = client.put(
-                "/api/v1/organization/nostradamus",
+                "/api/v1/organization",
                 json={"description": "Updated desc", "tags": ["updated"]},
             )
         assert response.status_code == 200

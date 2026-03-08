@@ -21,7 +21,7 @@ dev:
 	uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 build:
-	docker build -t nostradamus-ioto-api .
+	docker build -t cenotoo-api .
 
 up:
 	docker compose up -d

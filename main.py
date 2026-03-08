@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(application: FastAPI):
     """Manage application startup and shutdown events."""
     del application
-    logger.info("Starting Nostradamus IoTO API")
+    logger.info("Starting Cenotoo API")
     if settings.environment != "development":
         if settings.jwt_secret_key == "supersecretkey":
             raise RuntimeError("JWT_SECRET_KEY must be changed from default in production")
@@ -35,7 +35,7 @@ async def lifespan(application: FastAPI):
     from utilities.cassandra_connector import shutdown_cassandra
 
     shutdown_cassandra()
-    logger.info("Nostradamus IoTO API shutdown complete")
+    logger.info("Cenotoo API shutdown complete")
 
 
 # Rate limiter
@@ -46,7 +46,7 @@ app = FastAPI(
     title=settings.app_name,
     version="1.0.1",
     description=(
-        "The Nostradamus IoTO API provides endpoints for managing the Nostradamus IoTO platform."
+        "The Cenotoo API provides endpoints for managing the Cenotoo data streaming platform."
     ),
     lifespan=lifespan,
 )

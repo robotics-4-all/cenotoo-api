@@ -10,13 +10,25 @@ from confluent_kafka.admin import AdminClient
 from config import settings
 
 
+def _apply_sasl_config(config):
+    """Add SASL authentication keys to a Kafka config dict if credentials are set."""
+    if settings.kafka_username:
+        config["security.protocol"] = settings.kafka_security_protocol
+        config["sasl.mechanism"] = settings.kafka_sasl_mechanism
+        config["sasl.username"] = settings.kafka_username
+        config["sasl.password"] = settings.kafka_password
+    return config
+
+
 def get_kafka_admin_client():
     """Create and return a Kafka admin client.
 
     Returns:
         Configured Kafka AdminClient instance.
     """
-    return AdminClient({"bootstrap.servers": settings.kafka_brokers})
+    config = {"bootstrap.servers": settings.kafka_brokers}
+    _apply_sasl_config(config)
+    return AdminClient(config)
 
 
 def get_kafka_producer():
@@ -25,6 +37,6 @@ def get_kafka_producer():
     Returns:
         Configured Kafka Producer instance.
     """
-    return Producer(
-        {"bootstrap.servers": settings.kafka_brokers, "queue.buffering.max.messages": 200000}
-    )
+    config = {"bootstrap.servers": settings.kafka_brokers, "queue.buffering.max.messages": 200000}
+    _apply_sasl_config(config)
+    return Producer(config)

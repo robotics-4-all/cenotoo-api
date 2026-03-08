@@ -6,7 +6,7 @@ Covers:
 - services/user_service.py
 
 Each service function has at least one happy-path and one error-path test.
-All external dependencies (utilities, docker, etc.) are mocked at the
+All external dependencies (utilities, etc.) are mocked at the
 service module namespace level.
 """
 

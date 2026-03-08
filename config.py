@@ -17,15 +17,21 @@ class Settings(BaseSettings):
     jwt_refresh_expiration_days: int = 7
 
     kafka_brokers: str = "localhost:59498"
+    kafka_username: str = ""
+    kafka_password: str = ""
+    kafka_sasl_mechanism: str = "SCRAM-SHA-512"
+    kafka_security_protocol: str = "SASL_PLAINTEXT"
 
     cassandra_contact_points: str = "localhost"
     cassandra_port: int = 9042
     cassandra_keyspace: str = "metadata"
+    cassandra_username: str = ""
+    cassandra_password: str = ""
 
     api_key_secret: str = "default-api-key-secret"
     organization_id: str = Field(
         default="default-organization-id",
-        validation_alias=AliasChoices("NOSTRADAMUS_ORGANIZATION_ID", "organization_id"),
+        validation_alias=AliasChoices("ORGANIZATION_ID", "organization_id"),
     )
 
     cors_origins: str = "*"
@@ -34,7 +40,7 @@ class Settings(BaseSettings):
     rate_limit_auth: str = "10/minute"
 
     otlp_endpoint: str = ""
-    otlp_service_name: str = "nostradamus-ioto-api"
+    otlp_service_name: str = "cenotoo-api"
 
     model_config = SettingsConfigDict(
         env_file=".env",

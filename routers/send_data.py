@@ -3,10 +3,8 @@ import logging
 import uuid
 from datetime import datetime
 
-from confluent_kafka import Producer
 from fastapi import APIRouter, Body, Depends, HTTPException
 
-from config import settings
 from dependencies import (
     check_project_exists,
     get_organization_id,
@@ -17,6 +15,7 @@ from utilities.collection_utils import (
     fetch_collection_schema,
     get_collection_by_id,
 )
+from utilities.kafka_connector import get_kafka_producer
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
 
@@ -131,9 +130,7 @@ async def send_data_to_collection(
     data: dict | list[dict] = Body(...),
 ):
     """Validate and send data to a collection's Kafka topic."""
-    kafka_producer = Producer(
-        {"bootstrap.servers": settings.kafka_brokers, "queue.buffering.max.messages": 200000}
-    )
+    kafka_producer = get_kafka_producer()
 
     organization_id = get_organization_id()
     organization_name = get_organization_by_id(organization_id).organization_name

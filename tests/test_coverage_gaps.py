@@ -98,7 +98,7 @@ class TestKafkaConnector:
 
     def test_get_kafka_producer(self):
         """Test that get_kafka_producer returns a valid producer instance."""
-        with patch("confluent_kafka.Producer") as mock_producer:
+        with patch("utilities.kafka_connector.Producer") as mock_producer:
             mock_producer.return_value = MagicMock()
             from utilities.kafka_connector import get_kafka_producer
 
