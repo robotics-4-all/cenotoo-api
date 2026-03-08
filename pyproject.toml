@@ -1,0 +1,129 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "nostradamus-ioto-api"
+version = "1.0.1"
+description = "FastAPI REST service for IoT data ingestion, storage, and retrieval"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+
+dependencies = [
+    "fastapi>=0.100.0",
+    "fastapi-cli>=0.0.1",
+    "uvicorn>=0.20.0",
+    "cassandra-driver==3.29.1",
+    "confluent-kafka==2.4.0",
+    "kafka-python==2.0.2",
+    "pydantic==2.7.2",
+    "pydantic-settings==2.7.1",
+    "docker==7.1.0",
+    "pandas==2.0.3",
+    "python-dotenv>=1.0.0",
+    "PyJWT>=2.8.0",
+    "bcrypt>=4.0.0",
+    "python-multipart>=0.0.22",
+    "slowapi>=0.1.9",
+]
+
+[project.optional-dependencies]
+tracing = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "ruff>=0.4.0",
+    "pylint>=3.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.5.0",
+]
+
+[tool.setuptools]
+py-modules = ["main", "config", "dependencies"]
+
+[tool.setuptools.packages.find]
+include = ["api*", "core*", "models*", "routers*", "services*", "utilities*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "SIM",  # flake8-simplify
+    "C4",   # flake8-comprehensions
+    "RET",  # flake8-return
+    "PLR",  # pylint refactor (too-many-args, etc.)
+    "B904", # raise-without-from-inside-except
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults (FastAPI Depends)
+    "PLR2004",  # magic value comparison (acceptable in business logic)
+    "PLR0911",  # too many return statements
+    "PLR0912",  # too many branches
+    "PLR0915",  # too many statements
+    "RET504",   # unnecessary assignment before return (improves readability)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["PLR0913"]
+
+[tool.ruff.lint.pylint]
+max-args = 12
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "models", "routers", "services", "utilities"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.pylint.main]
+disable = [
+    "C0114",  # missing-module-docstring (not flagged by external analyzer)
+    "C0411", "C0412", "C0413",  # import-order (ruff/isort handles)
+    "C0103",  # invalid-name
+    "C0415",  # import-outside-toplevel (used in tests)
+    "R0801",  # duplicate-code
+    "R0903",  # too-few-public-methods
+    "W0404",  # reimported (ruff handles)
+    "W0611",  # unused-import (ruff handles)
+    "E0611",  # no-name-in-module
+    "C0301",  # line-too-long (ruff handles)
+    "W0718",  # broad-exception-caught
+    "C0201",  # consider-using-dict-items
+]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint.design]
+max-args = 12
+max-locals = 55
+max-branches = 55
+max-statements = 150
+max-returns = 20
+max-nested-blocks = 8
+max-positional-arguments = 12
+
+[tool.mypy]
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_configs = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+no_implicit_optional = false
