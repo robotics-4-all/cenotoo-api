@@ -13,8 +13,8 @@ class TestHealthEndpoint:
     def test_ready_all_ok(self, client, mock_cassandra_session):
         """Verify ready endpoint returns 200 when all services are up."""
         mock_cassandra_session.execute.return_value = [MagicMock(release_version="4.0")]
-        with patch("confluent_kafka.admin.AdminClient") as mock_admin_cls:
-            mock_admin_cls.return_value.list_topics.return_value = {}
+        with patch("confluent_kafka.Consumer") as mock_consumer_cls:
+            mock_consumer_cls.return_value.list_topics.return_value = MagicMock()
             response = client.get("/ready")
         assert response.status_code == 200
         data = response.json()
@@ -25,8 +25,8 @@ class TestHealthEndpoint:
     def test_ready_cassandra_down(self, client, mock_cassandra_session):
         """Verify ready endpoint returns 503 when Cassandra is down."""
         mock_cassandra_session.execute.side_effect = Exception("connection refused")
-        with patch("confluent_kafka.admin.AdminClient") as mock_admin_cls:
-            mock_admin_cls.return_value.list_topics.return_value = {}
+        with patch("confluent_kafka.Consumer") as mock_consumer_cls:
+            mock_consumer_cls.return_value.list_topics.return_value = MagicMock()
             response = client.get("/ready")
         assert response.status_code == 503
         data = response.json()
@@ -34,11 +34,11 @@ class TestHealthEndpoint:
         assert "error" in data["checks"]["cassandra"]
 
     def test_ready_kafka_down(self, client, mock_cassandra_session):
-        """Verify ready endpoint returns 503 when Kafka is down."""
+        """Verify ready returns 200 with degraded kafka when Kafka is down."""
         mock_cassandra_session.execute.return_value = [MagicMock(release_version="4.0")]
-        with patch("confluent_kafka.admin.AdminClient") as mock_admin_cls:
-            mock_admin_cls.return_value.list_topics.side_effect = Exception("broker unreachable")
+        with patch("confluent_kafka.Consumer") as mock_consumer_cls:
+            mock_consumer_cls.return_value.list_topics.side_effect = Exception("broker unreachable")
             response = client.get("/ready")
-        assert response.status_code == 503
+        assert response.status_code == 200
         data = response.json()
-        assert data["checks"]["kafka"].startswith("error")
+        assert data["checks"]["kafka"].startswith("degraded")

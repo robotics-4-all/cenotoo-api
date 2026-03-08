@@ -5,11 +5,13 @@ cassandra-driver==3.29.1
 confluent-kafka==2.4.0
 kafka-python==2.0.2
 pydantic==2.7.2
+numpy<2
 pandas==2.0.3
 pytest
 httpx
 pytest-asyncio
 python-dotenv
+PyJWT>=2.8.0
 python-jose
 passlib[bcrypt]
 pydantic-settings==2.7.1

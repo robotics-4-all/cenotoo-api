@@ -20,6 +20,7 @@ RUN groupadd --gid 1000 appuser && \
 COPY --from=builder /install /usr/local
 
 COPY main.py config.py dependencies.py ./
+COPY api/ api/
 COPY core/ core/
 COPY models/ models/
 COPY routers/ routers/

@@ -50,15 +50,21 @@ async def ready() -> dict[str, Any] | Response:
         all_ok = False
 
     try:
-        from confluent_kafka.admin import AdminClient
+        from confluent_kafka import Consumer
 
-        admin = AdminClient({"bootstrap.servers": settings.kafka_brokers})
-        admin.list_topics(timeout=5)
+        conf = {"bootstrap.servers": settings.kafka_brokers, "group.id": "cenotoo-health"}
+        if settings.kafka_username:
+            conf["security.protocol"] = settings.kafka_security_protocol
+            conf["sasl.mechanism"] = settings.kafka_sasl_mechanism
+            conf["sasl.username"] = settings.kafka_username
+            conf["sasl.password"] = settings.kafka_password
+        consumer = Consumer(conf)
+        consumer.list_topics(timeout=5)
+        consumer.close()
         checks["kafka"] = "ok"
     except Exception as e:
         logger.warning("Readiness: Kafka check failed: %s", e)
-        checks["kafka"] = f"error: {e}"
-        all_ok = False
+        checks["kafka"] = f"degraded: {e}"
 
     if not all_ok:
         return JSONResponse(
