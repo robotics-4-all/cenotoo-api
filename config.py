@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     cassandra_contact_points: str = "localhost"
     cassandra_port: int = 9042
     cassandra_keyspace: str = "metadata"
+    cassandra_dc: str = "dc1"
     cassandra_username: str = ""
     cassandra_password: str = ""
 
