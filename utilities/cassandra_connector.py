@@ -20,13 +20,21 @@ _INITIAL_BACKOFF = 2.0
 
 
 def get_cassandra_session():
-    """Create and return a configured Cassandra database session.
+    """Return a cached Cassandra session, creating one if needed.
 
-    Retries with exponential backoff if Cassandra is not yet available.
+    Uses a lazy singleton: the first call creates the connection (with
+    exponential-backoff retry), subsequent calls reuse it.  If the cached
+    session has been shut down, a new connection is established.
 
     Returns:
         Configured Cassandra session connected to the metadata keyspace.
     """
+    if _state["session"] is not None and not _state["session"].is_shutdown:
+        return _state["session"]
+
+    # Clean up stale connection before reconnecting
+    shutdown_cassandra()
+
     execution_profile = ExecutionProfile(
         load_balancing_policy=DCAwareRoundRobinPolicy(local_dc=settings.cassandra_dc),
         request_timeout=60.0,
@@ -51,6 +59,8 @@ def get_cassandra_session():
             cluster = Cluster(**cluster_kwargs)
             session = cluster.connect("metadata")
             logger.info("Connected to Cassandra (attempt %d/%d)", attempt, _MAX_RETRIES)
+            _state["cluster"] = cluster
+            _state["session"] = session
             return session
         except Exception as exc:
             if attempt == _MAX_RETRIES:

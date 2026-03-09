@@ -11,8 +11,6 @@ from utilities.cassandra_connector import get_cassandra_session
 
 session = get_cassandra_session()
 
-session = get_cassandra_session()
-
 # Insert a new organization into the database
 
 
