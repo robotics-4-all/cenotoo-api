@@ -174,7 +174,7 @@ async def send_data_to_collection(
 
         # STEP 2: Add required auto-generated fields if they don't exist
         if "key" not in message:
-            message["key"] = "key"
+            message["key"] = str(uuid.uuid4())
 
         if "timestamp" not in message:
             message["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")

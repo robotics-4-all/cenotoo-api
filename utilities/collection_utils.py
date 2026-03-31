@@ -103,24 +103,29 @@ async def fetch_collection_by_name(
     return session.execute(query, (collection_name, project_id, organization_id)).one()
 
 
+SYSTEM_FIELDS = {"key", "timestamp", "day"}
+
+
 async def fetch_collection_schema(organization_name: str, project_name: str, collection_name: str):
     """Fetch the schema of a collection."""
-    # Try with exact case first
     schema_query = """
     SELECT column_name, type
     FROM system_schema.columns
     WHERE keyspace_name=%s AND table_name=%s
     """
     rows = session.execute(schema_query, (organization_name, f"{project_name}_{collection_name}"))
-    flat_schema = {row.column_name: row.type for row in rows}
+    flat_schema = {
+        row.column_name: row.type for row in rows if row.column_name not in SYSTEM_FIELDS
+    }
 
-    # If no schema found, try with lowercase as fallback
     if not flat_schema:
         rows = session.execute(
             schema_query,
             (organization_name.lower(), f"{project_name.lower()}_{collection_name.lower()}"),
         )
-        flat_schema = {row.column_name: row.type for row in rows}
+        flat_schema = {
+            row.column_name: row.type for row in rows if row.column_name not in SYSTEM_FIELDS
+        }
 
     return unflatten_schema(flat_schema)
 
