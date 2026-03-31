@@ -14,6 +14,7 @@ from utilities.collection_utils import (
     check_collection_exists,
     fetch_collection_schema,
     get_collection_by_id,
+    insert_data_into_table,
 )
 from utilities.kafka_connector import get_kafka_producer
 from utilities.organization_utils import get_organization_by_id
@@ -225,17 +226,15 @@ async def send_data_to_collection(
             },
         )
 
-    # Send valid messages to Kafka
     for i, message_data in enumerate(valid_messages):
-        # Extract the key from the message_data
-        message_key = message_data.pop("key")
-
-        # Send the rest of the message data to Kafka, excluding the key
-        kafka_producer.produce(topic_name, key=message_key, value=json.dumps(message_data))
+        message_key = message_data["key"]
+        kafka_value = {k: v for k, v in message_data.items() if k != "key"}
+        kafka_producer.produce(topic_name, key=message_key, value=json.dumps(kafka_value))
         if (i + 1) % flush_threshold == 0:
             kafka_producer.flush()
 
     kafka_producer.flush()
+    await insert_data_into_table(organization_name, project_name, collection_name, valid_messages)
 
     return {
         "message": f"Data sent to collection '{collection_name}' successfully.",
