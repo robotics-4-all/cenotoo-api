@@ -11,12 +11,13 @@ from fastapi import APIRouter, Depends, Query
 
 from dependencies import check_organization_exists, get_current_user_from_jwt, verify_superadmin
 from models.common import MessageResponse, PaginatedResponse
-from models.user_models import Username, UserRequest
+from models.user_models import Username, UserRequest, UserRoleUpdateRequest
 from services.user_service import (
     create_user_service,
     delete_user_service,
     get_all_users_service,
     update_user_password_service,
+    update_user_role_service,
 )
 
 router = APIRouter(
@@ -92,6 +93,20 @@ async def update_user_password(
         Success message.
     """
     return await update_user_password_service(organization_id, data, current_user)
+
+
+@router.put(
+    "/organizations/{organization_id}/users/update_role",
+    response_model=MessageResponse,
+    summary="Update user role",
+    description="Update a user's role within an organization. Requires superadmin privileges.",
+)
+async def update_user_role(
+    organization_id: uuid.UUID,
+    data: UserRoleUpdateRequest,
+    current_user: Any = Depends(get_current_user_from_jwt),
+):
+    return await update_user_role_service(organization_id, data.username, data.role, current_user)
 
 
 @router.delete(

@@ -46,7 +46,11 @@ async def get_user_by_username_and_org_id(username: str, organization_id: uuid.U
 
 
 async def insert_user(
-    user_id: uuid.UUID, organization_id: uuid.UUID, username: str, hashed_password: str
+    user_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    username: str,
+    hashed_password: str,
+    role: str = "member",
 ):
     """Insert a new user into the database.
 
@@ -55,12 +59,13 @@ async def insert_user(
         organization_id: UUID of the organization.
         username: The user's username.
         hashed_password: The hashed password.
+        role: The user's role within the organization.
     """
     query = """
-        INSERT INTO user (id, organization_id, username, password)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO user (id, organization_id, username, password, role)
+        VALUES (%s, %s, %s, %s, %s)
     """
-    session.execute(query, (user_id, organization_id, username, hashed_password))
+    session.execute(query, (user_id, organization_id, username, hashed_password, role))
 
 
 async def delete_user_from_db(user_id: uuid.UUID):
@@ -91,8 +96,19 @@ async def get_all_users_in_organization(organization_id: uuid.UUID):
         organization_id: UUID of the organization.
 
     Returns:
-        List of user dictionaries with usernames.
+        List of user dictionaries with username and role.
     """
-    query = "SELECT id, username FROM user WHERE organization_id=%s ALLOW FILTERING"
+    query = "SELECT id, username, role FROM user WHERE organization_id=%s ALLOW FILTERING"
     users = session.execute(query, (organization_id,)).all()
-    return [{"username": user.username} for user in users]
+    return [{"username": user.username, "role": user.role or "member"} for user in users]
+
+
+async def update_user_role_in_db(user_id: uuid.UUID, role: str):
+    """Update a user's role in the database.
+
+    Args:
+        user_id: UUID of the user.
+        role: The new role to assign.
+    """
+    query = "UPDATE user SET role=%s WHERE id=%s"
+    session.execute(query, (role, user_id))

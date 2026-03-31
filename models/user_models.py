@@ -13,10 +13,12 @@ class UserRequest(BaseModel):
     Attributes:
         username: The user's unique username.
         password: The user's password (plain text for input, hashed for storage).
+        role: The user's role within the organization. Defaults to 'member'.
     """
 
     username: str
     password: str
+    role: str = "member"
 
 
 class Username(BaseModel):
@@ -27,3 +29,8 @@ class Username(BaseModel):
     """
 
     username: str
+
+
+class UserRoleUpdateRequest(BaseModel):
+    username: str
+    role: str

@@ -20,6 +20,7 @@ from utilities.user_utils import (
     get_user_by_username_and_org_id,
     insert_user,
     update_user_password_in_db,
+    update_user_role_in_db,
 )
 
 
@@ -56,7 +57,7 @@ async def create_user_service(organization_id: uuid.UUID, user_data: UserRequest
     hashed_password = hash_password(user_data.password)
     user_id = uuid.uuid4()
 
-    await insert_user(user_id, organization_id, user_data.username, hashed_password)
+    await insert_user(user_id, organization_id, user_data.username, hashed_password, user_data.role)
 
     return {"message": "User created successfully", "user_id": str(user_id)}
 
@@ -130,3 +131,31 @@ async def get_all_users_service(organization_id: uuid.UUID):
     """
     users = await get_all_users_in_organization(organization_id)
     return {"users": users}
+
+
+async def update_user_role_service(
+    organization_id: uuid.UUID, username: str, role: str, current_user: Any
+):
+    """Update a user's role within an organization.
+
+    Args:
+        organization_id: UUID of the organization.
+        username: Username of the user to update.
+        role: The new role to assign.
+        current_user: Currently authenticated user.
+
+    Returns:
+        Success message.
+
+    Raises:
+        HTTPException: If user not found or unauthorized.
+    """
+    if current_user.role != "superadmin":
+        raise HTTPException(status_code=403, detail="Unauthorized to change user roles")
+
+    user = await get_user_by_username_and_org_id(username, organization_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await update_user_role_in_db(user.id, role)
+    return {"message": "User role updated successfully"}
