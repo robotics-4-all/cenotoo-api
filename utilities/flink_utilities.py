@@ -177,6 +177,54 @@ def get_source_ddl_display(fields: dict[str, str]) -> str:
     )
 
 
+def _source_ddl_named(topic: str, fields: dict[str, str], table_name: str) -> str:
+    auth = _kafka_auth_props()
+    col_lines = "\n".join(
+        f"  `{name}` {_USER_TO_FLINK_TYPES.get(ftype, 'STRING')}," for name, ftype in fields.items()
+    )
+    return (
+        f"CREATE TABLE {table_name} (\n"
+        f"  `key` STRING,\n"
+        f"{col_lines}\n"
+        f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f") WITH (\n"
+        f"  'connector' = 'kafka',\n"
+        f"  'topic' = '{topic}',\n"
+        f"  'properties.bootstrap.servers' = '{settings.kafka_brokers}',{auth}\n"
+        f"  'value.format' = 'json',\n"
+        f"  'scan.startup.mode' = 'earliest-offset'\n"
+        f")"
+    )
+
+
+def get_collection_ddl_display(table_name: str, fields: dict[str, str]) -> str:
+    col_lines = "\n".join(
+        f"  `{name}` {_USER_TO_FLINK_TYPES.get(ftype, 'STRING')}," for name, ftype in fields.items()
+    )
+    return (
+        f"CREATE TABLE {table_name} (\n"
+        f"  `key` STRING,\n"
+        f"{col_lines}\n"
+        f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f")"
+    )
+
+
+def generate_cross_collection_job_statements(
+    source_collections: list[dict[str, Any]],
+    sink_topic: str,
+    user_sql: str,
+) -> list[str]:
+    stmts: list[str] = [f"ADD JAR '{_KAFKA_CONNECTOR_JAR}'"]
+    for col in source_collections:
+        stmts.append(_source_ddl_named(col["topic"], col["fields"], col["table_name"]))
+    stmts.append(_sink_ddl_custom(sink_topic))
+    stmts.append(f"INSERT INTO KafkaSink\n{user_sql}")
+    return stmts
+
+
 def generate_custom_job_statements(
     source_topic: str,
     fields: dict[str, str],

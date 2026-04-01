@@ -11,6 +11,7 @@ from routers import (
     auth,
     collection_keys,
     collections,
+    cross_collection_jobs,
     delete_data,
     flink_jobs,
     get_data,
@@ -35,4 +36,5 @@ router.include_router(get_data.router)
 router.include_router(delete_data.router)
 router.include_router(get_data_stats.router)
 router.include_router(flink_jobs.router)
+router.include_router(cross_collection_jobs.router)
 router.include_router(users.router)

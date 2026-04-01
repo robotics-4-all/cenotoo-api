@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+CROSS_COLLECTION_SENTINEL = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 WindowType = Literal["tumbling", "sliding"]
 TimeUnit = Literal["second", "minute", "hour", "day"]
 Metric = Literal[
@@ -92,3 +94,37 @@ class FlinkJobResultsResponse(BaseModel):
     metric: str
     attribute: str
     sink_topic: str
+
+
+class CrossCollectionJobRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    collection_ids: list[uuid.UUID] = Field(min_length=2)
+    sql: str = Field(min_length=10)
+
+
+class CrossCollectionJobResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    collection_ids: list[uuid.UUID]
+    config: dict
+    sink_topic: str
+    status: JobStatus
+    created_at: str
+
+
+class CrossCollectionJobListResponse(BaseModel):
+    items: list[CrossCollectionJobResponse]
+    total: int
+
+
+class CrossCollectionSourceSchema(BaseModel):
+    collection_id: str
+    collection_name: str
+    table_name: str
+    source_ddl: str
+
+
+class CrossCollectionSchemaResponse(BaseModel):
+    collections: list[CrossCollectionSourceSchema]
+    sink_columns: list[str]
