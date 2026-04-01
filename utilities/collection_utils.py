@@ -14,6 +14,7 @@ from utilities.kafka_connector import get_kafka_admin_client
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
 from utilities.schema_utils import (
+    CASSANDRA_TO_USER_TYPES,
     flatten_object,
     is_list_of_same_schema,
     unflatten_schema,
@@ -115,7 +116,9 @@ async def fetch_collection_schema(organization_name: str, project_name: str, col
     """
     rows = session.execute(schema_query, (organization_name, f"{project_name}_{collection_name}"))
     flat_schema = {
-        row.column_name: row.type for row in rows if row.column_name not in SYSTEM_FIELDS
+        row.column_name: CASSANDRA_TO_USER_TYPES.get(row.type, row.type)
+        for row in rows
+        if row.column_name not in SYSTEM_FIELDS
     }
 
     if not flat_schema:
@@ -124,7 +127,9 @@ async def fetch_collection_schema(organization_name: str, project_name: str, col
             (organization_name.lower(), f"{project_name.lower()}_{collection_name.lower()}"),
         )
         flat_schema = {
-            row.column_name: row.type for row in rows if row.column_name not in SYSTEM_FIELDS
+            row.column_name: CASSANDRA_TO_USER_TYPES.get(row.type, row.type)
+            for row in rows
+            if row.column_name not in SYSTEM_FIELDS
         }
 
     return unflatten_schema(flat_schema)

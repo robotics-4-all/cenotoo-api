@@ -12,6 +12,7 @@ from routers import (
     collection_keys,
     collections,
     delete_data,
+    flink_jobs,
     get_data,
     get_data_stats,
     organization,
@@ -33,4 +34,5 @@ router.include_router(send_data.router)
 router.include_router(get_data.router)
 router.include_router(delete_data.router)
 router.include_router(get_data_stats.router)
+router.include_router(flink_jobs.router)
 router.include_router(users.router)

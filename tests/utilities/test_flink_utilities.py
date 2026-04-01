@@ -1,119 +1,145 @@
-import os
-import tempfile
-from unittest.mock import MagicMock, patch
-
+import httpx
 import pytest
+import respx
 
-from utilities.flink_utilities import deploy_flink_script, generate_flink_script
+from models.flink_job_models import GuidedJobRequest
+from utilities.flink_utilities import (
+    build_sink_topic,
+    gateway_cancel_session,
+    gateway_create_session,
+    gateway_get_operation_status,
+    gateway_submit_statement,
+    generate_guided_job_statements,
+)
+
+GATEWAY_URL = "http://localhost:8083"
 
 
-class TestGenerateFlinkScript:
-    """Tests for generate_flink_script."""
+class TestBuildSinkTopic:
+    def test_tumbling_topic_format(self):
+        job = GuidedJobRequest(attribute="temperature", metric="avg", window_size=5, unit="minute")
+        topic = build_sink_topic("org", "proj", "coll", job)
+        assert topic == "org.proj.coll.stats.5minute.avg.temperature"
 
-    def test_tumbling_window(self):
-        """Verify generate_flink_script creates correct script for tumbling window."""
-        script = generate_flink_script(
-            project_name="proj",
-            topic_name="org.proj.coll",
-            attribute="temperature",
-            every_n=5,
-            units="minute",
-            metric="avg",
-            interval_type="tumbling",
-        )
-
-        assert "TUMBLE" in script
-        assert "temperature" in script
-        assert "org.proj.coll" in script
-        assert "KafkaSource" in script
-        assert "KafkaSink" in script
-        assert "avg" in script.lower() or "AVG" in script
-
-    def test_sliding_window(self):
-        """Verify generate_flink_script creates correct script for sliding window."""
-        script = generate_flink_script(
-            project_name="proj",
-            topic_name="org.proj.coll",
+    def test_sliding_topic_format(self):
+        job = GuidedJobRequest(
             attribute="humidity",
-            every_n=10,
-            units="second",
             metric="sum",
-            interval_type="sliding",
-            sliding_factor=5,
+            window_type="sliding",
+            window_size=10,
+            unit="second",
+            sliding_step=2,
         )
+        topic = build_sink_topic("myorg", "myproj", "mycoll", job)
+        assert topic == "myorg.myproj.mycoll.stats.10second.sum.humidity"
 
-        assert "HOP" in script
-        assert "humidity" in script
-        assert "SECOND" in script
 
-    def test_unsupported_interval_raises(self):
-        """Verify generate_flink_script raises ValueError for unsupported interval type."""
-        with pytest.raises(ValueError, match="Unsupported interval type"):
-            generate_flink_script(
-                project_name="proj",
-                topic_name="org.proj.coll",
-                attribute="temp",
-                every_n=5,
-                units="minute",
-                metric="avg",
-                interval_type="session",
+class TestGenerateGuidedJobStatements:
+    def test_returns_four_statements(self):
+        job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
+        stmts = generate_guided_job_statements(
+            "org", "proj", "coll", job, "org.proj.coll.stats.5minute.avg.temp"
+        )
+        assert len(stmts) == 4
+
+    def test_first_statement_is_add_jar(self):
+        job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert stmts[0].startswith("ADD JAR")
+        assert "flink-sql-connector-kafka" in stmts[0]
+
+    def test_source_ddl_contains_kafka_topic(self):
+        job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert "org.proj.coll" in stmts[1]
+        assert "KafkaSource" in stmts[1]
+
+    def test_sink_ddl_contains_sink_topic(self):
+        job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "my-sink-topic")
+        assert "my-sink-topic" in stmts[2]
+        assert "KafkaSink" in stmts[2]
+
+    def test_insert_dml_tumbling(self):
+        job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert "TUMBLE" in stmts[3]
+        assert "INSERT INTO KafkaSink" in stmts[3]
+        assert "avg_temp" in stmts[3]
+
+    def test_insert_dml_sliding(self):
+        job = GuidedJobRequest(
+            attribute="temp",
+            metric="min",
+            window_type="sliding",
+            window_size=10,
+            unit="minute",
+            sliding_step=2,
+        )
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert "HOP" in stmts[3]
+        assert "min_temp" in stmts[3]
+
+    def test_count_metric_uses_count_star(self):
+        job = GuidedJobRequest(attribute="temp", metric="count", window_size=1, unit="hour")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert "COUNT(*)" in stmts[3]
+
+    def test_stddev_metric(self):
+        job = GuidedJobRequest(attribute="temp", metric="stddev", window_size=1, unit="hour")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert "STDDEV_POP" in stmts[3]
+
+
+class TestGatewayCreateSession:
+    @pytest.mark.asyncio
+    async def test_returns_session_handle(self):
+        with respx.mock(base_url=GATEWAY_URL) as mock:
+            mock.post("/v1/sessions").mock(
+                return_value=httpx.Response(200, json={"sessionHandle": "abc-123"})
             )
+            handle = await gateway_create_session()
+        assert handle == "abc-123"
 
-    def test_sink_topic_format(self):
-        """Verify generate_flink_script formats sink topic name correctly."""
-        script = generate_flink_script(
-            project_name="proj",
-            topic_name="org.proj.coll",
-            attribute="temp",
-            every_n=5,
-            units="minute",
-            metric="avg",
-            interval_type="tumbling",
-        )
-
-        assert "org.proj.coll.5minute.avg.temp" in script
-
-    def test_script_contains_pyflink_imports(self):
-        """Verify generate_flink_script includes necessary PyFlink imports."""
-        script = generate_flink_script(
-            project_name="proj",
-            topic_name="org.proj.coll",
-            attribute="temp",
-            every_n=1,
-            units="hour",
-            metric="max",
-            interval_type="tumbling",
-        )
-
-        assert "from pyflink.table import TableEnvironment" in script
-        assert "in_streaming_mode" in script
+    @pytest.mark.asyncio
+    async def test_raises_on_gateway_error(self):
+        with respx.mock(base_url=GATEWAY_URL) as mock:
+            mock.post("/v1/sessions").mock(return_value=httpx.Response(500))
+            with pytest.raises(httpx.HTTPStatusError):
+                await gateway_create_session()
 
 
-class TestDeployFlinkScript:
-    """Tests for deploy_flink_script."""
+class TestGatewaySubmitStatement:
+    @pytest.mark.asyncio
+    async def test_returns_operation_handle(self):
+        with respx.mock(base_url=GATEWAY_URL) as mock:
+            mock.post("/v1/sessions/sess-1/statements").mock(
+                return_value=httpx.Response(200, json={"operationHandle": "op-42"})
+            )
+            handle = await gateway_submit_statement("sess-1", "SELECT 1")
+        assert handle == "op-42"
 
-    def test_happy_path(self):
-        """Verify deploy_flink_script successfully deploys script to Flink container."""
-        mock_container = MagicMock()
-        mock_container.put_archive.return_value = True
-        mock_container.exec_run.return_value = MagicMock(exit_code=0, output=b"Job submitted")
 
-        mock_client = MagicMock()
-        mock_client.containers.get.return_value = mock_container
+class TestGatewayGetOperationStatus:
+    @pytest.mark.asyncio
+    async def test_returns_status_dict(self):
+        with respx.mock(base_url=GATEWAY_URL) as mock:
+            mock.get("/v1/sessions/sess-1/operations/op-1/status").mock(
+                return_value=httpx.Response(200, json={"status": "RUNNING"})
+            )
+            result = await gateway_get_operation_status("sess-1", "op-1")
+        assert result["status"] == "RUNNING"
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-            f.write("print('hello')")
-            script_path = f.name
 
-        try:
-            with patch("utilities.flink_utilities.docker") as mock_docker:
-                mock_docker.from_env.return_value = mock_client
+class TestGatewayCancelSession:
+    @pytest.mark.asyncio
+    async def test_cancels_successfully(self):
+        with respx.mock(base_url=GATEWAY_URL) as mock:
+            mock.delete("/v1/sessions/sess-1").mock(return_value=httpx.Response(200))
+            await gateway_cancel_session("sess-1")
 
-                deploy_flink_script(script_path)
-
-                mock_client.containers.get.assert_called_once_with("test-flink-jobmanager19-1")
-                mock_container.put_archive.assert_called_once()
-                mock_container.exec_run.assert_called_once()
-                assert os.path.basename(script_path) in mock_container.exec_run.call_args[0][0]
-        finally:
-            os.unlink(script_path)
+    @pytest.mark.asyncio
+    async def test_swallows_http_error(self):
+        with respx.mock(base_url=GATEWAY_URL) as mock:
+            mock.delete("/v1/sessions/sess-bad").mock(return_value=httpx.Response(404))
+            await gateway_cancel_session("sess-bad")

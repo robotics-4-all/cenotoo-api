@@ -1,128 +1,173 @@
-import io
-import os
-import tarfile
+import logging
+from typing import Any
 
-import docker
+import httpx
 
 from config import settings
+from models.flink_job_models import GuidedJobRequest
+
+logger = logging.getLogger(__name__)
+
+_METRIC_SQL: dict[str, str] = {
+    "avg": "AVG",
+    "min": "MIN",
+    "max": "MAX",
+    "sum": "SUM",
+    "count": "COUNT(*)",
+    "stddev": "STDDEV_POP",
+}
+
+_UNIT_FLINK: dict[str, str] = {
+    "second": "SECOND",
+    "minute": "MINUTE",
+    "hour": "HOUR",
+    "day": "DAY",
+}
 
 
-def generate_flink_script(
-    project_name: str,
-    topic_name: str,
-    attribute: str,
-    every_n: int,
-    units: str,
-    metric: str,
-    interval_type: str,
-    sliding_factor: int | None = None,
-    group_by: str | None = None,
-    order_by: str | None = None,
-) -> str:
-    """Generate a PyFlink script for streaming aggregation."""
-    del project_name, group_by, order_by  # Reserved for future use
-    source_table_sql = f"""
-t_env.execute_sql(\"\"\"
-CREATE TABLE KafkaSource (
-    `key` STRING,
-    `{attribute}` DOUBLE,
-    `timestamp` STRING,
-    `event_time` AS TO_TIMESTAMP(`timestamp`, 'yyyy-MM-dd''T''HH:mm:ss''Z'''),
-    WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND
-) WITH (
-    'connector' = 'kafka',
-    'topic' = '{topic_name}',
-    'properties.bootstrap.servers' = '{settings.kafka_brokers}',
-    'key.format' = 'raw',
-    'key.fields' = 'key',
-    'value.format' = 'json',
-    'value.fields-include' = 'EXCEPT_KEY',
-    'scan.startup.mode' = 'earliest-offset'
-)
-\"\"\")
-"""
-
-    sink_topic = f"{topic_name}.{every_n}{units}.{metric}.{attribute}"
-    sink_table_sql = f"""
-t_env.execute_sql(\"\"\"
-CREATE TABLE KafkaSink (
-    `key` STRING,
-    window_start TIMESTAMP(3),
-    window_end TIMESTAMP(3),
-    `count` BIGINT,
-    {metric}_{attribute} DOUBLE
-) WITH (
-    'connector' = 'kafka',
-    'topic' = '{sink_topic}',
-    'properties.bootstrap.servers' = '{settings.kafka_brokers}',
-    'format' = 'json'
-)
-\"\"\")
-"""
-
-    if interval_type == "tumbling":
-        window_start_sql = f"TUMBLE_START(`event_time`, INTERVAL '{every_n}' {units.upper()})"
-        window_end_sql = f"TUMBLE_END(`event_time`, INTERVAL '{every_n}' {units.upper()})"
-        window_sql = f"TUMBLE(`event_time`, INTERVAL '{every_n}' {units.upper()})"
-    elif interval_type == "sliding":
-        window_start_sql = (
-            f"HOP_START(event_time, INTERVAL '{sliding_factor}' {units.upper()}, "
-            f"INTERVAL '{every_n}' {units.upper()})"
-        )
-        window_end_sql = (
-            f"HOP_END(event_time, INTERVAL '{sliding_factor}' {units.upper()}, "
-            f"INTERVAL '{every_n}' {units.upper()})"
-        )
-        window_sql = (
-            f"HOP(event_time, INTERVAL '{sliding_factor}' {units.upper()}, "
-            f"INTERVAL '{every_n}' {units.upper()})"
-        )
-    else:
-        raise ValueError(f"Unsupported interval type: {interval_type}")
-
-    aggregation_sql = f"""
-t_env.execute_sql(\"\"\"
-INSERT INTO KafkaSink
-SELECT
-    `key`,
-    {window_start_sql} as window_start,
-    {window_end_sql} as window_end,
-    COUNT(*) as `count`,
-    {metric.upper()}({attribute}) as {metric}_{attribute}
-FROM KafkaSource
-GROUP BY `key`, {window_sql}
-\"\"\")
-"""
-
-    return f"""
-from pyflink.table import TableEnvironment, EnvironmentSettings
-
-env_settings = EnvironmentSettings.new_instance().in_streaming_mode().build()
-t_env = TableEnvironment.create(env_settings)
-table_config = t_env.get_config().set("table.exec.source.idle-timeout", "10000 ms")
-
-{source_table_sql}
-{sink_table_sql}
-{aggregation_sql}
-"""
+def build_sink_topic(org: str, project: str, collection: str, job: GuidedJobRequest) -> str:
+    return f"{org}.{project}.{collection}.stats.{job.window_size}{job.unit}.{job.metric}.{job.attribute}"
 
 
-def deploy_flink_script(script_file_path: str):
-    """Deploy and execute a PyFlink script in the JobManager container."""
-    client = docker.from_env()
-    container = client.containers.get("test-flink-jobmanager19-1")
-
-    with open(script_file_path, "rb") as script_file:
-        tar_stream = io.BytesIO()
-        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-            tar_info = tarfile.TarInfo(name=os.path.basename(script_file_path))
-            tar_info.size = os.path.getsize(script_file_path)
-            tar.addfile(tar_info, script_file)
-        tar_stream.seek(0)
-        container.put_archive("/opt/flink", tar_stream)
-
-    exec_log = container.exec_run(
-        f"/opt/flink/bin/flink run --python /opt/flink/{os.path.basename(script_file_path)} "
-        "--jarfile flink-sql-connector-kafka-3.0.2-1.18.jar"
+def _kafka_auth_props(indent: str = "  ") -> str:
+    if not settings.kafka_username:
+        return ""
+    return (
+        f"\n{indent}'properties.security.protocol' = '{settings.kafka_security_protocol}',"
+        f"\n{indent}'properties.sasl.mechanism' = '{settings.kafka_sasl_mechanism}',"
+        f"\n{indent}'properties.sasl.jaas.config' = 'org.apache.kafka.common.security.scram.ScramLoginModule"
+        f' required username="{settings.kafka_username}" password="{settings.kafka_password}";\','
     )
-    return exec_log
+
+
+def _source_ddl(topic: str, attribute: str) -> str:
+    auth = _kafka_auth_props()
+    return (
+        f"CREATE TABLE KafkaSource (\n"
+        f"  `key` STRING,\n"
+        f"  `{attribute}` DOUBLE,\n"
+        f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f") WITH (\n"
+        f"  'connector' = 'kafka',\n"
+        f"  'topic' = '{topic}',\n"
+        f"  'properties.bootstrap.servers' = '{settings.kafka_brokers}',{auth}\n"
+        f"  'value.format' = 'json',\n"
+        f"  'scan.startup.mode' = 'earliest-offset'\n"
+        f")"
+    )
+
+
+def _sink_ddl(sink_topic: str, attribute: str, metric: str) -> str:
+    auth = _kafka_auth_props()
+    return (
+        f"CREATE TABLE KafkaSink (\n"
+        f"  `key` STRING,\n"
+        f"  window_start TIMESTAMP(3),\n"
+        f"  window_end TIMESTAMP(3),\n"
+        f"  record_count BIGINT,\n"
+        f"  {metric}_{attribute} DOUBLE\n"
+        f") WITH (\n"
+        f"  'connector' = 'kafka',\n"
+        f"  'topic' = '{sink_topic}',\n"
+        f"  'properties.bootstrap.servers' = '{settings.kafka_brokers}',{auth}\n"
+        f"  'format' = 'json'\n"
+        f")"
+    )
+
+
+def _insert_dml(
+    attribute: str,
+    metric: str,
+    window_size: int,
+    unit: str,
+    window_type: str,
+    sliding_step: int | None,
+) -> str:
+    flink_unit = _UNIT_FLINK[unit]
+    value_expr = "COUNT(*)" if metric == "count" else f"{_METRIC_SQL[metric]}(`{attribute}`)"
+
+    if window_type == "tumbling":
+        window_expr = f"TUMBLE(`event_time`, INTERVAL '{window_size}' {flink_unit})"
+        start_expr = f"TUMBLE_START(`event_time`, INTERVAL '{window_size}' {flink_unit})"
+        end_expr = f"TUMBLE_END(`event_time`, INTERVAL '{window_size}' {flink_unit})"
+    else:
+        step = sliding_step or 1
+        window_expr = f"HOP(`event_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
+        start_expr = f"HOP_START(`event_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
+        end_expr = f"HOP_END(`event_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
+
+    return (
+        f"INSERT INTO KafkaSink\n"
+        f"SELECT\n"
+        f"  `key`,\n"
+        f"  {start_expr} AS window_start,\n"
+        f"  {end_expr} AS window_end,\n"
+        f"  COUNT(*) AS record_count,\n"
+        f"  {value_expr} AS {metric}_{attribute}\n"
+        f"FROM KafkaSource\n"
+        f"GROUP BY `key`, {window_expr}"
+    )
+
+
+_KAFKA_CONNECTOR_JAR = "file:///opt/flink/lib/flink-sql-connector-kafka-3.0.2-1.18.jar"
+
+
+def generate_guided_job_statements(
+    org: str,
+    project: str,
+    collection: str,
+    job: GuidedJobRequest,
+    sink_topic: str,
+) -> list[str]:
+    source_topic = f"{org}.{project}.{collection}"
+    return [
+        f"ADD JAR '{_KAFKA_CONNECTOR_JAR}'",
+        _source_ddl(source_topic, job.attribute),
+        _sink_ddl(sink_topic, job.attribute, job.metric),
+        _insert_dml(
+            job.attribute,
+            job.metric,
+            job.window_size,
+            job.unit,
+            job.window_type,
+            job.sliding_step,
+        ),
+    ]
+
+
+async def gateway_create_session() -> str:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(f"{settings.flink_sql_gateway_url}/v1/sessions")
+        resp.raise_for_status()
+        return resp.json()["sessionHandle"]
+
+
+async def gateway_submit_statement(session_handle: str, statement: str) -> str:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{settings.flink_sql_gateway_url}/v1/sessions/{session_handle}/statements",
+            json={"statement": statement},
+        )
+        resp.raise_for_status()
+        return resp.json()["operationHandle"]
+
+
+async def gateway_get_operation_status(
+    session_handle: str, operation_handle: str
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{settings.flink_sql_gateway_url}/v1/sessions/{session_handle}"
+            f"/operations/{operation_handle}/status"
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def gateway_cancel_session(session_handle: str) -> None:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            await client.delete(f"{settings.flink_sql_gateway_url}/v1/sessions/{session_handle}")
+        except httpx.HTTPError:
+            logger.warning("Failed to cancel SQL Gateway session %s", session_handle)

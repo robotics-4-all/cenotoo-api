@@ -5,9 +5,30 @@ from fastapi import HTTPException
 
 PYTHON_TO_CASSANDRA_TYPES = {
     int: "int",
-    float: "decimal",  # Changed from 'float' to 'decimal' for exact precision
+    float: "decimal",
     str: "text",
     bool: "boolean",
+}
+
+STRING_TO_CASSANDRA_TYPES = {
+    "text": "text",
+    "int": "int",
+    "float": "decimal",
+    "bool": "boolean",
+    "boolean": "boolean",
+    "date": "date",
+    "timestamp": "timestamp",
+}
+
+CASSANDRA_TO_USER_TYPES: dict[str, str] = {
+    "text": "text",
+    "int": "int",
+    "decimal": "float",
+    "float": "float",
+    "boolean": "bool",
+    "date": "date",
+    "timestamp": "timestamp",
+    "bigint": "int",
 }
 
 
@@ -67,8 +88,9 @@ def flatten_object(
                 items.append((new_key, "list<text>"))
         elif return_value:
             items.append((new_key, v))
+        elif isinstance(v, str) and v.lower() in STRING_TO_CASSANDRA_TYPES:
+            items.append((new_key, STRING_TO_CASSANDRA_TYPES[v.lower()]))
         else:
-            # If value is not a dictionary or list, store the corresponding Cassandra type
             cassandra_type = PYTHON_TO_CASSANDRA_TYPES.get(type(v), "text")
             items.append((new_key, cassandra_type))
 

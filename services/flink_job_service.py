@@ -1,0 +1,204 @@
+import json
+import logging
+import uuid
+
+from fastapi import HTTPException
+
+from models.flink_job_models import FlinkJobResponse, GuidedJobRequest
+from utilities.cassandra_connector import get_cassandra_session
+from utilities.collection_utils import get_collection_by_id
+from utilities.flink_utilities import (
+    build_sink_topic,
+    gateway_cancel_session,
+    gateway_create_session,
+    gateway_get_operation_status,
+    gateway_submit_statement,
+    generate_guided_job_statements,
+)
+from utilities.organization_utils import get_organization_by_id
+from utilities.project_utils import get_project_by_id
+
+logger = logging.getLogger(__name__)
+
+session = get_cassandra_session()
+
+
+def _row_to_response(row) -> FlinkJobResponse:
+    return FlinkJobResponse(
+        id=row.id,
+        collection_id=row.collection_id,
+        project_id=row.project_id,
+        job_type=row.job_type,
+        config=json.loads(row.config),
+        sink_topic=row.sink_topic,
+        status=row.status,
+        created_at=str(row.created_at),
+    )
+
+
+async def create_guided_job_service(
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job: GuidedJobRequest,
+) -> FlinkJobResponse:
+    org = get_organization_by_id(organization_id)
+    project = get_project_by_id(project_id, organization_id)
+    collection = get_collection_by_id(collection_id, project_id, organization_id)
+
+    org_name = org.organization_name
+    project_name = project.project_name
+    collection_name = collection.collection_name
+
+    sink_topic = build_sink_topic(org_name, project_name, collection_name, job)
+    statements = generate_guided_job_statements(
+        org_name, project_name, collection_name, job, sink_topic
+    )
+
+    try:
+        session_handle = await gateway_create_session()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Flink SQL Gateway unavailable: {exc}",
+        ) from exc
+
+    operation_handle: str | None = None
+    try:
+        for stmt in statements:
+            operation_handle = await gateway_submit_statement(session_handle, stmt)
+    except Exception as exc:
+        await gateway_cancel_session(session_handle)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit Flink SQL statements: {exc}",
+        ) from exc
+
+    if operation_handle is None:
+        await gateway_cancel_session(session_handle)
+        raise HTTPException(status_code=500, detail="No operation handle returned from SQL Gateway")
+
+    job_id = uuid.uuid4()
+    config_json = json.dumps(job.model_dump())
+
+    session.execute(
+        """
+        INSERT INTO flink_jobs
+            (id, collection_id, project_id, session_handle, operation_handle,
+             job_type, config, sink_topic, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, toTimestamp(now()))
+        """,
+        (
+            job_id,
+            collection_id,
+            project_id,
+            session_handle,
+            operation_handle,
+            "guided",
+            config_json,
+            sink_topic,
+            "RUNNING",
+        ),
+    )
+
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s", (job_id,)).one()
+    return _row_to_response(row)
+
+
+async def list_jobs_service(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+) -> list[FlinkJobResponse]:
+    rows = session.execute(
+        "SELECT * FROM flink_jobs WHERE collection_id=%s AND project_id=%s ALLOW FILTERING",
+        (collection_id, project_id),
+    )
+    return [_row_to_response(r) for r in rows]
+
+
+async def get_job_service(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> FlinkJobResponse:
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    if not row or row.collection_id != collection_id or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Flink job not found")
+
+    if row.status == "RUNNING":
+        try:
+            status_resp = await gateway_get_operation_status(
+                row.session_handle, row.operation_handle
+            )
+            gw_status = status_resp.get("status", "RUNNING")
+            if gw_status in ("ERROR", "CANCELED"):
+                new_status = "ERROR" if gw_status == "ERROR" else "CANCELLED"
+                session.execute(
+                    "UPDATE flink_jobs SET status=%s WHERE id=%s",
+                    (new_status, job_id),
+                )
+                row = session.execute(
+                    "SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+                ).one()
+        except Exception:
+            logger.warning("Could not refresh job status for job %s", job_id)
+
+    return _row_to_response(row)
+
+
+async def stop_job_service(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> dict:
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    if not row or row.collection_id != collection_id or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Flink job not found")
+    if row.status not in ("RUNNING", "PENDING"):
+        raise HTTPException(status_code=400, detail="Job is not running")
+
+    await gateway_cancel_session(row.session_handle)
+    session.execute("UPDATE flink_jobs SET status=%s WHERE id=%s", ("CANCELLED", job_id))
+    return {"message": f"Job {job_id} stopped"}
+
+
+async def delete_job_service(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> dict:
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    if not row or row.collection_id != collection_id or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Flink job not found")
+
+    if row.status in ("RUNNING", "PENDING"):
+        await gateway_cancel_session(row.session_handle)
+
+    session.execute("DELETE FROM flink_jobs WHERE id=%s", (job_id,))
+    return {"message": f"Job {job_id} deleted"}
+
+
+async def restart_job_service(
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> FlinkJobResponse:
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    if not row or row.collection_id != collection_id or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Flink job not found")
+
+    if row.status in ("RUNNING", "PENDING"):
+        await gateway_cancel_session(row.session_handle)
+        session.execute("UPDATE flink_jobs SET status=%s WHERE id=%s", ("CANCELLED", job_id))
+
+    config = json.loads(row.config)
+    job = GuidedJobRequest(**config)
+    return await create_guided_job_service(organization_id, project_id, collection_id, job)
+
+
+async def list_project_jobs_service(project_id: uuid.UUID) -> list[FlinkJobResponse]:
+    rows = session.execute(
+        "SELECT * FROM flink_jobs WHERE project_id=%s ALLOW FILTERING", (project_id,)
+    )
+    return [_row_to_response(r) for r in rows]
