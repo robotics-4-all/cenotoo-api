@@ -8,10 +8,16 @@ from dependencies import (
     verify_endpoint_access,
     verify_master_access,
 )
-from models.flink_job_models import FlinkJobListResponse, FlinkJobResponse, GuidedJobRequest
+from models.flink_job_models import (
+    FlinkJobListResponse,
+    FlinkJobResponse,
+    FlinkJobResultsResponse,
+    GuidedJobRequest,
+)
 from services.flink_job_service import (
     create_guided_job_service,
     delete_job_service,
+    get_job_results_service,
     get_job_service,
     list_jobs_service,
     list_project_jobs_service,
@@ -106,6 +112,21 @@ async def restart_job(
 ):
     organization_id = get_organization_id()
     return await restart_job_service(organization_id, project_id, collection_id, job_id)
+
+
+@router.get(
+    "/projects/{project_id}/collections/{collection_id}/jobs/{job_id}/results",
+    tags=[TAG],
+    response_model=FlinkJobResultsResponse,
+    dependencies=[Depends(check_collection_exists), Depends(verify_endpoint_access)],
+)
+async def get_job_results(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job_id: uuid.UUID,
+    limit: int = 100,
+):
+    return await get_job_results_service(project_id, collection_id, job_id, limit)
 
 
 @router.get(

@@ -46,3 +46,23 @@ class FlinkJobListResponse(BaseModel):
 
     items: list[FlinkJobResponse]
     total: int
+
+
+class FlinkJobResult(BaseModel):
+    """A single window result from a Flink aggregation job."""
+
+    key: str
+    window_start: str
+    window_end: str
+    record_count: int
+    value: float | None
+
+
+class FlinkJobResultsResponse(BaseModel):
+    """Response model for Flink job window results."""
+
+    items: list[FlinkJobResult]
+    total: int
+    metric: str
+    attribute: str
+    sink_topic: str

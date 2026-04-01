@@ -4,7 +4,12 @@ import uuid
 
 from fastapi import HTTPException
 
-from models.flink_job_models import FlinkJobResponse, GuidedJobRequest
+from models.flink_job_models import (
+    FlinkJobResponse,
+    FlinkJobResult,
+    FlinkJobResultsResponse,
+    GuidedJobRequest,
+)
 from utilities.cassandra_connector import get_cassandra_session
 from utilities.collection_utils import get_collection_by_id
 from utilities.flink_utilities import (
@@ -202,3 +207,43 @@ async def list_project_jobs_service(project_id: uuid.UUID) -> list[FlinkJobRespo
         "SELECT * FROM flink_jobs WHERE project_id=%s ALLOW FILTERING", (project_id,)
     )
     return [_row_to_response(r) for r in rows]
+
+
+async def get_job_results_service(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job_id: uuid.UUID,
+    limit: int,
+) -> FlinkJobResultsResponse:
+    from utilities.kafka_consumer import read_topic_messages
+
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    if not row or row.collection_id != collection_id or row.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Flink job not found")
+
+    config = json.loads(row.config)
+    metric = config["metric"]
+    attribute = config["attribute"]
+    value_key = f"{metric}_{attribute}"
+
+    raw = read_topic_messages(row.sink_topic, limit=limit)
+    items: list[FlinkJobResult] = []
+    for msg in raw:
+        raw_value = msg.get(value_key)
+        items.append(
+            FlinkJobResult(
+                key=str(msg.get("key", "")),
+                window_start=str(msg.get("window_start", "")),
+                window_end=str(msg.get("window_end", "")),
+                record_count=int(msg.get("record_count", 0)),
+                value=float(raw_value) if raw_value is not None else None,
+            )
+        )
+
+    return FlinkJobResultsResponse(
+        items=items,
+        total=len(items),
+        metric=metric,
+        attribute=attribute,
+        sink_topic=row.sink_topic,
+    )
