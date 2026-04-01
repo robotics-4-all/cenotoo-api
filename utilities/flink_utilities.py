@@ -15,6 +15,20 @@ _METRIC_SQL: dict[str, str] = {
     "sum": "SUM",
     "count": "COUNT(*)",
     "stddev": "STDDEV_POP",
+    "stddev_samp": "STDDEV_SAMP",
+    "var_pop": "VAR_POP",
+    "var_samp": "VAR_SAMP",
+    "first_value": "FIRST_VALUE",
+    "last_value": "LAST_VALUE",
+}
+
+_USER_TO_FLINK_TYPES: dict[str, str] = {
+    "text": "STRING",
+    "float": "DOUBLE",
+    "int": "INT",
+    "bool": "BOOLEAN",
+    "date": "DATE",
+    "timestamp": "TIMESTAMP(3)",
 }
 
 _UNIT_FLINK: dict[str, str] = {
@@ -108,6 +122,73 @@ def _insert_dml(
         f"FROM KafkaSource\n"
         f"GROUP BY `key`, {window_expr}"
     )
+
+
+def _source_ddl_full(topic: str, fields: dict[str, str]) -> str:
+    auth = _kafka_auth_props()
+    col_lines = "\n".join(
+        f"  `{name}` {_USER_TO_FLINK_TYPES.get(ftype, 'STRING')}," for name, ftype in fields.items()
+    )
+    return (
+        f"CREATE TABLE KafkaSource (\n"
+        f"  `key` STRING,\n"
+        f"{col_lines}\n"
+        f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f") WITH (\n"
+        f"  'connector' = 'kafka',\n"
+        f"  'topic' = '{topic}',\n"
+        f"  'properties.bootstrap.servers' = '{settings.kafka_brokers}',{auth}\n"
+        f"  'value.format' = 'json',\n"
+        f"  'scan.startup.mode' = 'earliest-offset'\n"
+        f")"
+    )
+
+
+def _sink_ddl_custom(sink_topic: str) -> str:
+    auth = _kafka_auth_props()
+    return (
+        f"CREATE TABLE KafkaSink (\n"
+        f"  `key` STRING,\n"
+        f"  window_start TIMESTAMP(3),\n"
+        f"  window_end TIMESTAMP(3),\n"
+        f"  record_count BIGINT,\n"
+        f"  value DOUBLE\n"
+        f") WITH (\n"
+        f"  'connector' = 'kafka',\n"
+        f"  'topic' = '{sink_topic}',\n"
+        f"  'properties.bootstrap.servers' = '{settings.kafka_brokers}',{auth}\n"
+        f"  'format' = 'json'\n"
+        f")"
+    )
+
+
+def get_source_ddl_display(fields: dict[str, str]) -> str:
+    col_lines = "\n".join(
+        f"  `{name}` {_USER_TO_FLINK_TYPES.get(ftype, 'STRING')}," for name, ftype in fields.items()
+    )
+    return (
+        f"CREATE TABLE KafkaSource (\n"
+        f"  `key` STRING,\n"
+        f"{col_lines}\n"
+        f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f")"
+    )
+
+
+def generate_custom_job_statements(
+    source_topic: str,
+    fields: dict[str, str],
+    sink_topic: str,
+    user_sql: str,
+) -> list[str]:
+    return [
+        f"ADD JAR '{_KAFKA_CONNECTOR_JAR}'",
+        _source_ddl_full(source_topic, fields),
+        _sink_ddl_custom(sink_topic),
+        f"INSERT INTO KafkaSink\n{user_sql}",
+    ]
 
 
 _KAFKA_CONNECTOR_JAR = "file:///opt/flink/lib/flink-sql-connector-kafka-3.0.2-1.18.jar"

@@ -7,7 +7,19 @@ from pydantic import BaseModel, Field, model_validator
 
 WindowType = Literal["tumbling", "sliding"]
 TimeUnit = Literal["second", "minute", "hour", "day"]
-Metric = Literal["avg", "min", "max", "sum", "count", "stddev"]
+Metric = Literal[
+    "avg",
+    "min",
+    "max",
+    "sum",
+    "count",
+    "stddev",
+    "stddev_samp",
+    "var_pop",
+    "var_samp",
+    "first_value",
+    "last_value",
+]
 JobStatus = Literal["RUNNING", "CANCELLED", "ERROR", "PENDING"]
 
 
@@ -46,6 +58,20 @@ class FlinkJobListResponse(BaseModel):
 
     items: list[FlinkJobResponse]
     total: int
+
+
+class CustomJobRequest(BaseModel):
+    """Request model for creating a custom Flink SQL job."""
+
+    name: str = Field(min_length=1, max_length=100)
+    sql: str = Field(min_length=10)
+
+
+class CustomSchemaResponse(BaseModel):
+    """Source table DDL and required sink columns for custom SQL jobs."""
+
+    source_ddl: str
+    sink_columns: list[str]
 
 
 class FlinkJobResult(BaseModel):

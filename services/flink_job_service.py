@@ -5,23 +5,28 @@ import uuid
 from fastapi import HTTPException
 
 from models.flink_job_models import (
+    CustomJobRequest,
+    CustomSchemaResponse,
     FlinkJobResponse,
     FlinkJobResult,
     FlinkJobResultsResponse,
     GuidedJobRequest,
 )
 from utilities.cassandra_connector import get_cassandra_session
-from utilities.collection_utils import get_collection_by_id
+from utilities.collection_utils import SYSTEM_FIELDS, get_collection_by_id
 from utilities.flink_utilities import (
     build_sink_topic,
     gateway_cancel_session,
     gateway_create_session,
     gateway_get_operation_status,
     gateway_submit_statement,
+    generate_custom_job_statements,
     generate_guided_job_statements,
+    get_source_ddl_display,
 )
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
+from utilities.schema_utils import CASSANDRA_TO_USER_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +207,112 @@ async def restart_job_service(
     return await create_guided_job_service(organization_id, project_id, collection_id, job)
 
 
+def _flat_collection_schema(
+    org_name: str, project_name: str, collection_name: str
+) -> dict[str, str]:
+    rows = session.execute(
+        "SELECT column_name, type FROM system_schema.columns WHERE keyspace_name=%s AND table_name=%s",
+        (org_name, f"{project_name}_{collection_name}"),
+    )
+    result: dict[str, str] = {}
+    for row in rows:
+        if row.column_name not in SYSTEM_FIELDS:
+            result[row.column_name] = CASSANDRA_TO_USER_TYPES.get(row.type) or row.type
+    return result
+
+
+async def create_custom_job_service(
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job: CustomJobRequest,
+) -> FlinkJobResponse:
+    org = get_organization_by_id(organization_id)
+    project = get_project_by_id(project_id, organization_id)
+    collection = get_collection_by_id(collection_id, project_id, organization_id)
+
+    org_name = org.organization_name
+    project_name = project.project_name
+    collection_name = collection.collection_name
+
+    fields = _flat_collection_schema(org_name, project_name, collection_name)
+    source_topic = f"{org_name}.{project_name}.{collection_name}"
+    job_id = uuid.uuid4()
+    sink_topic = f"{org_name}.{project_name}.{collection_name}.custom.{job_id}"
+
+    statements = generate_custom_job_statements(source_topic, fields, sink_topic, job.sql)
+
+    try:
+        session_handle = await gateway_create_session()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Flink SQL Gateway unavailable: {exc}",
+        ) from exc
+
+    operation_handle: str | None = None
+    try:
+        for stmt in statements:
+            operation_handle = await gateway_submit_statement(session_handle, stmt)
+    except Exception as exc:
+        await gateway_cancel_session(session_handle)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to submit Flink SQL statements: {exc}",
+        ) from exc
+
+    if operation_handle is None:
+        await gateway_cancel_session(session_handle)
+        raise HTTPException(status_code=500, detail="No operation handle returned from SQL Gateway")
+
+    config_json = json.dumps({"name": job.name, "sql": job.sql})
+    session.execute(
+        """
+        INSERT INTO flink_jobs
+            (id, collection_id, project_id, session_handle, operation_handle,
+             job_type, config, sink_topic, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, toTimestamp(now()))
+        """,
+        (
+            job_id,
+            collection_id,
+            project_id,
+            session_handle,
+            operation_handle,
+            "custom",
+            config_json,
+            sink_topic,
+            "RUNNING",
+        ),
+    )
+
+    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s", (job_id,)).one()
+    return _row_to_response(row)
+
+
+async def get_custom_schema_service(
+    organization_id: uuid.UUID,
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+) -> CustomSchemaResponse:
+    org = get_organization_by_id(organization_id)
+    project = get_project_by_id(project_id, organization_id)
+    collection = get_collection_by_id(collection_id, project_id, organization_id)
+
+    fields = _flat_collection_schema(
+        org.organization_name, project.project_name, collection.collection_name
+    )
+    source_ddl = get_source_ddl_display(fields)
+    sink_columns = [
+        "`key` STRING",
+        "window_start TIMESTAMP(3)",
+        "window_end TIMESTAMP(3)",
+        "record_count BIGINT",
+        "value DOUBLE",
+    ]
+    return CustomSchemaResponse(source_ddl=source_ddl, sink_columns=sink_columns)
+
+
 async def list_project_jobs_service(project_id: uuid.UUID) -> list[FlinkJobResponse]:
     rows = session.execute(
         "SELECT * FROM flink_jobs WHERE project_id=%s ALLOW FILTERING", (project_id,)
@@ -222,9 +333,14 @@ async def get_job_results_service(
         raise HTTPException(status_code=404, detail="Flink job not found")
 
     config = json.loads(row.config)
-    metric = config["metric"]
-    attribute = config["attribute"]
-    value_key = f"{metric}_{attribute}"
+    if row.job_type == "guided":
+        metric = config["metric"]
+        attribute = config["attribute"]
+        value_key = f"{metric}_{attribute}"
+    else:
+        metric = "custom"
+        attribute = config.get("name", "query")
+        value_key = "value"
 
     raw = read_topic_messages(row.sink_topic, limit=limit)
     items: list[FlinkJobResult] = []

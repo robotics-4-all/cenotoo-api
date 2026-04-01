@@ -9,14 +9,18 @@ from dependencies import (
     verify_master_access,
 )
 from models.flink_job_models import (
+    CustomJobRequest,
+    CustomSchemaResponse,
     FlinkJobListResponse,
     FlinkJobResponse,
     FlinkJobResultsResponse,
     GuidedJobRequest,
 )
 from services.flink_job_service import (
+    create_custom_job_service,
     create_guided_job_service,
     delete_job_service,
+    get_custom_schema_service,
     get_job_results_service,
     get_job_service,
     list_jobs_service,
@@ -57,6 +61,35 @@ async def list_jobs(
 ):
     items = await list_jobs_service(project_id, collection_id)
     return FlinkJobListResponse(items=items, total=len(items))
+
+
+@router.get(
+    "/projects/{project_id}/collections/{collection_id}/jobs/custom-hint",
+    tags=[TAG],
+    response_model=CustomSchemaResponse,
+    dependencies=[Depends(check_collection_exists), Depends(verify_endpoint_access)],
+)
+async def get_custom_hint(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+):
+    organization_id = get_organization_id()
+    return await get_custom_schema_service(organization_id, project_id, collection_id)
+
+
+@router.post(
+    "/projects/{project_id}/collections/{collection_id}/jobs/custom",
+    tags=[TAG],
+    response_model=FlinkJobResponse,
+    dependencies=[Depends(check_collection_exists), Depends(verify_master_access)],
+)
+async def create_custom_job(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    job: CustomJobRequest,
+):
+    organization_id = get_organization_id()
+    return await create_custom_job_service(organization_id, project_id, collection_id, job)
 
 
 @router.get(
