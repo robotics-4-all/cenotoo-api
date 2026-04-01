@@ -74,7 +74,7 @@ class TestInsertUser:
         mock_cassandra_session.execute.assert_called_once()
         args = mock_cassandra_session.execute.call_args
         assert "INSERT INTO user" in args[0][0]
-        assert args[0][1] == (user_id, org_id, "bob", "hashed_pw")
+        assert args[0][1] == (user_id, org_id, "bob", "hashed_pw", "member")
 
 
 class TestDeleteUserFromDb:
@@ -116,16 +116,19 @@ class TestGetAllUsersInOrganization:
     async def test_returns_list_of_users(self, mock_cassandra_session):
         """Verify get_all_users_in_organization returns a list of users."""
         org_id = uuid.uuid4()
-        UserListRow = namedtuple("UserListRow", ["id", "username"])
+        UserListRow = namedtuple("UserListRow", ["id", "username", "role"])
         rows = [
-            UserListRow(id=uuid.uuid4(), username="alice"),
-            UserListRow(id=uuid.uuid4(), username="bob"),
+            UserListRow(id=uuid.uuid4(), username="alice", role="admin"),
+            UserListRow(id=uuid.uuid4(), username="bob", role="member"),
         ]
         mock_cassandra_session.execute.return_value = MagicMock(all=MagicMock(return_value=rows))
 
         result = await get_all_users_in_organization(org_id)
 
-        assert result == [{"username": "alice"}, {"username": "bob"}]
+        assert result == [
+            {"username": "alice", "role": "admin"},
+            {"username": "bob", "role": "member"},
+        ]
 
     @pytest.mark.asyncio
     async def test_returns_empty_list_when_no_users(self, mock_cassandra_session):

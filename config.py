@@ -34,7 +34,6 @@ class Settings(BaseSettings):
         default="default-organization-id",
         validation_alias=AliasChoices("ORGANIZATION_ID", "organization_id"),
     )
-
     flink_sql_gateway_url: str = "http://localhost:8083"
 
     cors_origins: str = "*"

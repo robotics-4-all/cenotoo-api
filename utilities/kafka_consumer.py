@@ -2,8 +2,7 @@ import json
 import logging
 import uuid
 
-from confluent_kafka import Consumer, KafkaError, TopicPartition
-from confluent_kafka import OFFSET_BEGINNING
+from confluent_kafka import OFFSET_BEGINNING, Consumer, KafkaError, TopicPartition
 
 from config import settings
 from utilities.kafka_connector import _apply_sasl_config
