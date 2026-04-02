@@ -13,6 +13,7 @@ from routers import (
     collections,
     cross_collection_jobs,
     delete_data,
+    devices,
     flink_jobs,
     get_data,
     get_data_stats,
@@ -20,6 +21,7 @@ from routers import (
     project,
     project_keys,
     send_data,
+    stream_data,
     users,
 )
 
@@ -38,3 +40,5 @@ router.include_router(get_data_stats.router)
 router.include_router(flink_jobs.router)
 router.include_router(cross_collection_jobs.router)
 router.include_router(users.router)
+router.include_router(stream_data.router)
+router.include_router(devices.router)

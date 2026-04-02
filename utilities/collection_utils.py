@@ -15,6 +15,7 @@ from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
 from utilities.schema_utils import (
     CASSANDRA_TO_USER_TYPES,
+    STRING_TO_CASSANDRA_TYPES,
     flatten_object,
     is_list_of_same_schema,
     unflatten_schema,
@@ -256,6 +257,75 @@ def check_collection_exists(collection_id: uuid.UUID, project_id: uuid.UUID):
     if not collection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found.")
     return collection
+
+
+async def alter_cassandra_table_add_columns(
+    organization_name: str, project_name: str, collection_name: str, fields: dict[str, str]
+) -> list[str]:
+    validate_cql_identifier(organization_name, "keyspace")
+    validate_cql_identifier(project_name, "project")
+    validate_cql_identifier(collection_name, "collection")
+
+    keyspace_name = organization_name
+    table_name = f"{project_name}_{collection_name}"
+
+    existing_query = (
+        "SELECT column_name FROM system_schema.columns WHERE keyspace_name=%s AND table_name=%s"
+    )
+    existing_rows = session.execute(existing_query, (keyspace_name, table_name))
+    existing_cols = {row.column_name for row in existing_rows}
+
+    added: list[str] = []
+    for col, user_type in fields.items():
+        if col in SYSTEM_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Cannot add system field '{col}'.")
+        cql_type = STRING_TO_CASSANDRA_TYPES.get(user_type.lower())
+        if cql_type is None:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported type '{user_type}' for field '{col}'."
+            )
+        if col in existing_cols:
+            raise HTTPException(status_code=409, detail=f"Field '{col}' already exists.")
+        try:
+            session.execute(f'ALTER TABLE {keyspace_name}."{table_name}" ADD "{col}" {cql_type}')
+            added.append(col)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to add column '{col}': {str(e)}"
+            ) from e
+    return added
+
+
+async def alter_cassandra_table_drop_columns(
+    organization_name: str, project_name: str, collection_name: str, fields: list[str]
+) -> list[str]:
+    validate_cql_identifier(organization_name, "keyspace")
+    validate_cql_identifier(project_name, "project")
+    validate_cql_identifier(collection_name, "collection")
+
+    keyspace_name = organization_name
+    table_name = f"{project_name}_{collection_name}"
+
+    existing_query = (
+        "SELECT column_name FROM system_schema.columns WHERE keyspace_name=%s AND table_name=%s"
+    )
+    existing_rows = session.execute(existing_query, (keyspace_name, table_name))
+    existing_cols = {row.column_name for row in existing_rows}
+
+    removed: list[str] = []
+    for col in fields:
+        if col in SYSTEM_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Cannot remove system field '{col}'.")
+        if col not in existing_cols:
+            raise HTTPException(status_code=404, detail=f"Field '{col}' does not exist.")
+        try:
+            session.execute(f'ALTER TABLE {keyspace_name}."{table_name}" DROP "{col}"')
+            removed.append(col)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to drop column '{col}': {str(e)}"
+            ) from e
+    return removed
 
 
 async def insert_data_into_table(

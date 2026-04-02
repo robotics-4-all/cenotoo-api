@@ -38,6 +38,11 @@ class CollectionUpdateRequest(BaseModel):
     tags: list[str] | None = None
 
 
+class SchemaEvolutionRequest(BaseModel):
+    add_fields: dict[str, str] = {}
+    remove_fields: list[str] = []
+
+
 class CollectionResponse(BaseModel):
     """Response model for collection information.
 

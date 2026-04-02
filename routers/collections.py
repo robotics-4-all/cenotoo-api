@@ -6,7 +6,7 @@ and retrieving collections within projects.
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from dependencies import (
     check_project_exists,
@@ -18,6 +18,7 @@ from models.collection_models import (
     CollectionCreateRequest,
     CollectionResponse,
     CollectionUpdateRequest,
+    SchemaEvolutionRequest,
 )
 from models.common import PaginatedResponse
 from services.collection_service import (
@@ -27,7 +28,14 @@ from services.collection_service import (
     get_collection_info_service,
     update_collection_service,
 )
-from utilities.collection_utils import check_collection_exists
+from utilities.collection_utils import (
+    alter_cassandra_table_add_columns,
+    alter_cassandra_table_drop_columns,
+    check_collection_exists,
+    get_collection_by_id,
+)
+from utilities.organization_utils import get_organization_by_id
+from utilities.project_utils import get_project_by_id
 
 router = APIRouter(dependencies=[Depends(check_project_exists)])
 TAG = "Collection Management"
@@ -160,3 +168,43 @@ async def get_collection_info(
     """
     organization_id = get_organization_id()
     return await get_collection_info_service(organization_id, project_id, collection_id)
+
+
+@router.patch(
+    "/projects/{project_id}/collections/{collection_id}/schema",
+    tags=[TAG],
+    dependencies=[Depends(check_collection_exists), Depends(verify_master_access)],
+)
+async def evolve_collection_schema(
+    project_id: uuid.UUID,
+    collection_id: uuid.UUID,
+    data: SchemaEvolutionRequest,
+):
+    if not data.add_fields and not data.remove_fields:
+        raise HTTPException(
+            status_code=400, detail="At least one of add_fields or remove_fields must be provided."
+        )
+    organization_id = get_organization_id()
+    organization_name = get_organization_by_id(organization_id).organization_name
+    collection = get_collection_by_id(collection_id, project_id, organization_id)
+    project_name = get_project_by_id(project_id, organization_id).project_name
+    collection_name = collection.collection_name
+
+    added: list[str] = []
+    removed: list[str] = []
+
+    if data.add_fields:
+        added = await alter_cassandra_table_add_columns(
+            organization_name, project_name, collection_name, data.add_fields
+        )
+    if data.remove_fields:
+        removed = await alter_cassandra_table_drop_columns(
+            organization_name, project_name, collection_name, data.remove_fields
+        )
+
+    parts = []
+    if added:
+        parts.append(f"Added {len(added)} field(s)")
+    if removed:
+        parts.append(f"Removed {len(removed)} field(s)")
+    return {"message": "; ".join(parts) + ".", "added": added, "removed": removed}

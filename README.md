@@ -127,6 +127,9 @@ Tests mock Cassandra and Kafka — no infrastructure required.
 - **Pagination**: All list endpoints return `PaginatedResponse` with `items`, `total`, `offset`, `limit`
 - **API Versioning**: All endpoints under `/api/v1` prefix, ready for future versions
 - **SASL Authentication**: Kafka and Cassandra auth configured via environment variables
+- **SSE Real-time Streaming**: `GET /projects/{pid}/collections/{cid}/stream` streams live Kafka messages to connected clients as Server-Sent Events; supports JWT and API key auth, sends keepalive comments to prevent proxy timeouts
+- **Device Management**: Full device registry with `POST/GET/PUT/DELETE /projects/{pid}/devices` and a device shadow/twin system (`GET /shadow`, `PUT /shadow/desired`, `PUT /shadow/reported`) including automatic delta computation between reported and desired state
+- **Schema Evolution**: `PATCH /projects/{pid}/collections/{cid}/schema` adds or removes Cassandra columns on live tables without recreating them; validates types against the supported type map and rejects system fields (`key`, `timestamp`, `day`)
 
 ## Organization Setup Guide
 
@@ -328,6 +331,87 @@ curl -X GET \
 ```
 
 Available statistics: `avg`, `max`, `min`, `sum`, `count`, `distinct`.
+
+### Step 9 — Stream Live Data (SSE)
+
+Subscribe to a real-time stream of new messages published to a collection:
+
+```bash
+curl -N \
+  "$BASE_URL/api/v1/projects/<project_id>/collections/<collection_id>/stream" \
+  -H "X-API-Key: <read_api_key>"
+```
+
+Each message is delivered as a Server-Sent Event:
+
+```
+data: {"sensor_id": "sensor-001", "temperature": 23.5, "timestamp": "..."}
+
+data: {"sensor_id": "sensor-002", "temperature": 21.0, "timestamp": "..."}
+```
+
+The stream starts from the latest offset (live-only, not historical) and sends `: keepalive` comments every ~15 seconds to keep proxies alive.
+
+### Step 10 — Register and Manage Devices
+
+Register a physical or logical device to a project:
+
+```bash
+curl -X POST "$BASE_URL/api/v1/projects/<project_id>/devices" \
+  -H "X-API-Key: <master_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "temperature-sensor-01",
+    "description": "Rooftop temperature sensor",
+    "tags": ["rooftop", "temperature"]
+  }'
+```
+
+Update the device desired state (cloud → device):
+
+```bash
+curl -X PUT "$BASE_URL/api/v1/projects/<project_id>/devices/<device_id>/shadow/desired" \
+  -H "X-API-Key: <write_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"state": {"mode": "active", "threshold": 30.0}}'
+```
+
+Get the device shadow including delta between reported and desired state:
+
+```bash
+curl "$BASE_URL/api/v1/projects/<project_id>/devices/<device_id>/shadow" \
+  -H "X-API-Key: <read_api_key>"
+```
+
+Response:
+
+```json
+{
+  "device_id": "<uuid>",
+  "reported": {"mode": "idle", "threshold": 30.0},
+  "desired":  {"mode": "active", "threshold": 30.0},
+  "delta":    {"mode": "active"},
+  "reported_at": "...",
+  "desired_at": "..."
+}
+```
+
+### Step 11 — Evolve a Collection Schema
+
+Add or remove fields from an existing collection without recreating it:
+
+```bash
+curl -X PATCH \
+  "$BASE_URL/api/v1/projects/<project_id>/collections/<collection_id>/schema" \
+  -H "X-API-Key: <master_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "add_fields": {"battery_level": "float", "firmware": "text"},
+    "remove_fields": ["legacy_field"]
+  }'
+```
+
+Supported types for `add_fields`: `text`, `int`, `float`, `bool`, `date`, `timestamp`. System fields (`key`, `timestamp`, `day`) cannot be added or removed. Adding a field that already exists returns `409`; removing a non-existent field returns `404`.
 
 ## API
 
