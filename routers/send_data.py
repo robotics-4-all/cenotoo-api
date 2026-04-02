@@ -142,7 +142,7 @@ async def send_data_to_collection(
 
     # Get the collection's schema
     schema = await fetch_collection_schema(organization_name, project_name, collection_name)
-    print(f"Schema for collection '{collection_name}': {schema}")
+    logger.debug("Schema for collection '%s': %s", collection_name, schema)
 
     if not schema:
         raise HTTPException(
@@ -179,7 +179,7 @@ async def send_data_to_collection(
 
         if "timestamp" not in message:
             message["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-            print(f"Added missing 'timestamp' field to message {i}")
+            logger.debug("Added missing 'timestamp' field to message %d", i)
         # Convert the 'timestamp' string to a datetime object and extract 'day'
         try:
             timestamp_dt = datetime.fromisoformat(message["timestamp"].replace("Z", "+00:00"))

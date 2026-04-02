@@ -11,7 +11,7 @@ from dependencies import (
     check_project_exists,
     generate_filter_condition,
     get_organization_id,
-    verify_write_access,
+    verify_endpoint_access,
 )
 from utilities.cassandra_connector import get_cassandra_session
 from utilities.collection_utils import check_collection_exists, get_collection_by_id
@@ -22,6 +22,8 @@ from utilities.schema_utils import unflatten_data
 logger = logging.getLogger(__name__)
 
 session = get_cassandra_session()
+
+MAX_FETCH = 10_000
 
 
 router = APIRouter(dependencies=[Depends(check_project_exists)])
@@ -47,7 +49,7 @@ class OrderBy(BaseModel):
 @router.get(
     "/projects/{project_id}/collections/{collection_id}/get_data",
     tags=[TAG],
-    dependencies=[Depends(check_collection_exists), Depends(verify_write_access)],
+    dependencies=[Depends(check_collection_exists), Depends(verify_endpoint_access)],
 )
 async def get_data_from_collection(
     project_id: uuid.UUID,
@@ -82,10 +84,11 @@ async def get_data_from_collection(
     WHERE keyspace_name=%s AND table_name=%s
     """
 
-    # Debug information
-    print(
-        f"Looking for schema with: keyspace={organization_name}, "
-        f"table={project_name}_{collection_name}"
+    logger.debug(
+        "Looking for schema with: keyspace=%s, table=%s_%s",
+        organization_name,
+        project_name,
+        collection_name,
     )
 
     # IMPORTANT: For system_schema queries, Cassandra requires EXACT case
@@ -95,7 +98,7 @@ async def get_data_from_collection(
 
     # If no schema found, try fallbacks with different case combinations
     if not schema:
-        print("No schema found with exact case, trying alternative cases...")
+        logger.debug("No schema found with exact case, trying alternative cases")
 
         # Try all lowercase
         rows = session.execute(
@@ -108,7 +111,7 @@ async def get_data_from_collection(
         if not schema:
             table_query = "SELECT table_name FROM system_schema.tables WHERE keyspace_name=%s"
             tables = [r.table_name for r in session.execute(table_query, (organization_name,))]
-            print(f"Tables in keyspace: {tables}")
+            logger.debug("Tables in keyspace: %s", tables)
 
             # Only raise error if we need to validate attributes
             if attributes:
@@ -165,9 +168,9 @@ async def get_data_from_collection(
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    query += " ALLOW FILTERING"
+    fetch_cap = min(offset + limit, MAX_FETCH) if limit is not None else MAX_FETCH
+    query += f" LIMIT {fetch_cap} ALLOW FILTERING"
 
-    # Execute query
     try:
         results = session.execute(query)
         # Convert results to list

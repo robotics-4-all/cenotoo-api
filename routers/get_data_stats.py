@@ -1,17 +1,17 @@
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from core.filters import escape_cql_string
 from dependencies import (
     aggregate_data,
     check_project_exists,
     generate_filter_condition,
     get_organization_id,
-    verify_write_access,
+    verify_endpoint_access,
 )
 from utilities.cassandra_connector import get_cassandra_session
 from utilities.collection_utils import check_collection_exists, get_collection_by_id
@@ -29,7 +29,7 @@ TAG = "Get Data Statistics"
 @router.get(
     "/projects/{project_id}/collections/{collection_id}/statistics",
     tags=[TAG],
-    dependencies=[Depends(check_collection_exists), Depends(verify_write_access)],
+    dependencies=[Depends(check_collection_exists), Depends(verify_endpoint_access)],
 )
 async def get_collection_statistics(
     project_id: uuid.UUID,
@@ -49,7 +49,6 @@ async def get_collection_statistics(
     limit: int | None = Query(None, description="Maximum number of results to return"),
 ):
     """Retrieve aggregated statistics for a collection's data."""
-    del limit
     organization_id = get_organization_id()
     # Get names from IDs
     organization = get_organization_by_id(organization_id)
@@ -61,6 +60,23 @@ async def get_collection_statistics(
 
     keyspace_name = f'"{organization_name}"'
     table_name = f'"{project_name}_{collection_name}"'
+
+    ts_from: datetime | None = None
+    ts_to: datetime | None = None
+    if start_time:
+        try:
+            ts_from = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="Invalid start_time format. Use ISO 8601."
+            ) from exc
+    if end_time:
+        try:
+            ts_to = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="Invalid end_time format. Use ISO 8601."
+            ) from exc
 
     # Handle distinct operation differently
     if stat == "distinct":
@@ -99,15 +115,15 @@ async def get_collection_statistics(
                         if filter_condition:
                             conditions.append(filter_condition)
 
-            # Add time conditions
-            if start_time and end_time:
-                conditions.append(
-                    f"\"timestamp\" >= '{start_time}' AND \"timestamp\" <= '{end_time}'"
-                )
-            elif start_time:
-                conditions.append(f"\"timestamp\" >= '{escape_cql_string(start_time)}'")
-            elif end_time:
-                conditions.append(f"\"timestamp\" <= '{end_time}'")
+            if ts_from and ts_to:
+                conditions.append('"timestamp" >= %s AND "timestamp" <= %s')
+                params.extend([ts_from, ts_to])
+            elif ts_from:
+                conditions.append('"timestamp" >= %s')
+                params.append(ts_from)
+            elif ts_to:
+                conditions.append('"timestamp" <= %s')
+                params.append(ts_to)
 
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
@@ -186,6 +202,9 @@ async def get_collection_statistics(
             if order:
                 key_stats.sort(key=lambda x: x["key"], reverse=order == "desc")
 
+            if limit is not None:
+                key_stats = key_stats[:limit]
+
             return {
                 "collection_name": collection_name,
                 "stat": "distinct",
@@ -199,15 +218,6 @@ async def get_collection_statistics(
                 status_code=500, detail=f"Failed to retrieve distinct values: {str(e)}"
             ) from e
 
-    # For regular statistics, attribute is required
-    if not attribute:
-        raise HTTPException(
-            status_code=422, detail="Attribute is required for non-distinct statistics"
-        )
-
-    # Get schema information
-
-    # For regular statistics, attribute is required
     if not attribute:
         raise HTTPException(
             status_code=422, detail="Attribute is required for non-distinct statistics"
@@ -277,28 +287,25 @@ async def get_collection_statistics(
                 if filter_condition:
                     conditions.append(filter_condition)
 
-    # Add WHERE conditions if there are any
+    params: list[Any] = []
+
+    if ts_from and ts_to:
+        conditions.append('"timestamp" >= %s AND "timestamp" <= %s')
+        params.extend([ts_from, ts_to])
+    elif ts_from:
+        conditions.append('"timestamp" >= %s')
+        params.append(ts_from)
+    elif ts_to:
+        conditions.append('"timestamp" <= %s')
+        params.append(ts_to)
+
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
 
-    # Add time conditions
-    if start_time and end_time:
-        if not conditions:
-            query += (
-                f" WHERE timestamp >= '{escape_cql_string(start_time)}'"
-                f" AND timestamp <= '{escape_cql_string(end_time)}'"
-            )
-        else:
-            query += (
-                f" AND timestamp >= '{escape_cql_string(start_time)}' "
-                f"AND timestamp <= '{escape_cql_string(end_time)}'"
-            )
-
     query += " ALLOW FILTERING"
 
-    # Execute the query and fetch data
     try:
-        results = session.execute(query)
+        results = session.execute(query, params)
         # Instead of using _asdict() which converts column names to Python identifiers,
         # manually construct the dictionary using the original column names
         # from the schema
@@ -354,5 +361,8 @@ async def get_collection_statistics(
 
     if order:
         aggregated_data.sort(key=lambda x: x.get(f"{stat}_{attribute}"), reverse=order == "desc")
+
+    if limit is not None:
+        aggregated_data = aggregated_data[:limit]
 
     return aggregated_data
