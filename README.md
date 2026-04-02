@@ -1,17 +1,55 @@
-# Cenotoo API
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" alt="Python 3.11" />
+  <img src="https://img.shields.io/badge/FastAPI-0.100+-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Cassandra-4.x-1287B1?logo=apachecassandra&logoColor=white" alt="Cassandra" />
+  <img src="https://img.shields.io/badge/Kafka-KRaft-blue?logo=apachekafka&logoColor=white" alt="Kafka" />
+  <img src="https://img.shields.io/badge/tests-456_passing-brightgreen" alt="456 tests passing" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-orange?logo=apache&logoColor=white" alt="Apache 2.0" /></a>
+</p>
 
-FastAPI REST service for real-time data ingestion, storage, and retrieval.
+<h1 align="center">Cenotoo API</h1>
 
-**Stack**: Python 3.11 / FastAPI / Cassandra / Kafka
+<p align="center">
+  <strong>The REST interface for the Cenotoo IoT data platform.</strong><br/>
+  Ingest · Query · Stream · Manage devices — all over HTTP, with JWT and API key auth.
+</p>
 
-**Docs**: Available at `/docs` when running (Swagger UI)
+<p align="center">
+  <a href="https://github.com/robotics-4-all/cenotoo">⬅ Platform Repository</a>
+  &nbsp;·&nbsp;
+  <a href="#-quick-start">Quick Start</a>
+  &nbsp;·&nbsp;
+  <a href="#features">Features</a>
+  &nbsp;·&nbsp;
+  <a href="#organization-setup-guide">Setup Guide</a>
+</p>
 
-## Quick Start
+---
+
+## Features
+
+| Feature | Endpoint | Description |
+|---------|----------|-------------|
+| **Data Ingestion** | `POST /send_data` | Single records or JSON arrays, validated against collection schema |
+| **Historical Query** | `GET /get_data` | Filter by field, time range, and order; fully paginated |
+| **Time-series Stats** | `GET /statistics` | `avg`, `max`, `min`, `sum`, `count`, `distinct` over configurable intervals |
+| **SSE Streaming** | `GET /stream` | Live Kafka messages delivered as Server-Sent Events — zero polling |
+| **Schema Evolution** | `PATCH /schema` | Add or remove Cassandra columns on live tables with zero downtime |
+| **Device Registry** | `POST/GET/PUT/DELETE /devices` | Register, list, update, and deactivate devices per project |
+| **Device Shadow / Twin** | `GET /shadow` | Separate `desired` and `reported` state; automatic `delta` computation |
+| **Dual Auth** | `Authorization` / `X-API-Key` | JWT bearer tokens for users; scoped API keys for devices and services |
+| **Rate Limiting** | all endpoints | Configurable per-endpoint limits via `slowapi` |
+| **OpenTelemetry** | — | Opt-in distributed tracing via `OTLP_ENDPOINT` env var |
+| **Pagination** | all list endpoints | `PaginatedResponse` with `items`, `total`, `offset`, `limit` |
+
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Python 3.11+
-- Docker & Docker Compose (for infrastructure services)
+- Docker & Docker Compose (for the full stack)
 
 ### Local Development
 
@@ -19,22 +57,18 @@ FastAPI REST service for real-time data ingestion, storage, and retrieval.
 git clone https://github.com/robotics-4-all/cenotoo-api.git
 cd cenotoo-api
 
-python -m venv .venv
-source .venv/bin/activate
-
+python -m venv .venv && source .venv/bin/activate
 make install-dev
 
-cp .env.example .env
-# Edit .env with your configuration
-
-make dev
+cp .env.example .env   # edit with your config
+make dev               # starts uvicorn with hot reload
 ```
 
-The API docs are at `http://localhost:8000/docs`.
+Swagger UI: `http://localhost:8000/docs`
 
 ### Docker Compose (Full Stack)
 
-Starts the API with Cassandra and Kafka (KRaft mode, no ZooKeeper):
+Starts the API together with Cassandra and Kafka (KRaft, no ZooKeeper):
 
 ```bash
 cp .env.example .env
@@ -48,6 +82,8 @@ make build
 docker run -p 8000:8000 --env-file .env cenotoo-api
 ```
 
+---
+
 ## Make Targets
 
 | Target | Description |
@@ -55,39 +91,43 @@ docker run -p 8000:8000 --env-file .env cenotoo-api
 | `make install` | Install production dependencies |
 | `make install-dev` | Install production + dev dependencies |
 | `make dev` | Start dev server with hot reload |
-| `make test` | Run test suite |
+| `make test` | Run test suite (456 tests, no infra required) |
 | `make lint` | Run ruff linter |
-| `make format` | Auto-format code with ruff |
+| `make format` | Auto-format with ruff |
 | `make build` | Build Docker image |
 | `make up` | Start all services (docker compose) |
 | `make down` | Stop all services |
 | `make logs` | Tail API container logs |
 | `make clean` | Remove caches and build artifacts |
 
+---
+
 ## Configuration
 
 All configuration is via environment variables. See `.env.example` for the full list.
 
 | Variable | Required | Description |
-|----------|----------|-------------|
-| `JWT_SECRET_KEY` | Yes (prod) | JWT signing secret |
-| `API_KEY_SECRET` | Yes (prod) | API key generation secret |
-| `ADMIN_USERNAME` | Yes | Admin login username |
-| `ADMIN_PASSWORD` | Yes | Admin login password |
-| `KAFKA_BROKERS` | No | Kafka broker addresses (default: `localhost:9092`) |
-| `KAFKA_USERNAME` | No | Kafka SASL username (empty = no auth) |
-| `KAFKA_PASSWORD` | No | Kafka SASL password |
-| `KAFKA_SASL_MECHANISM` | No | SASL mechanism (default: `SCRAM-SHA-512`) |
-| `KAFKA_SECURITY_PROTOCOL` | No | Security protocol (default: `SASL_PLAINTEXT`) |
-| `CASSANDRA_CONTACT_POINTS` | No | Cassandra host (default: `localhost`) |
-| `CASSANDRA_PORT` | No | Cassandra port (default: `9042`) |
-| `CASSANDRA_USERNAME` | No | Cassandra username (empty = no auth) |
-| `CASSANDRA_PASSWORD` | No | Cassandra password |
-| `ORGANIZATION_ID` | No | Organization UUID |
-| `RATE_LIMIT_DEFAULT` | No | Global rate limit (default: `120/minute`) |
-| `RATE_LIMIT_AUTH` | No | Auth endpoint rate limit (default: `10/minute`) |
-| `OTLP_ENDPOINT` | No | OpenTelemetry exporter endpoint (empty = disabled) |
-| `OTLP_SERVICE_NAME` | No | Service name for tracing (default: `cenotoo-api`) |
+|----------|:--------:|-------------|
+| `JWT_SECRET_KEY` | prod | JWT signing secret |
+| `API_KEY_SECRET` | prod | API key HMAC secret |
+| `ADMIN_USERNAME` | yes | Admin login username |
+| `ADMIN_PASSWORD` | yes | Admin login password |
+| `KAFKA_BROKERS` | no | Broker addresses (default: `localhost:9092`) |
+| `KAFKA_USERNAME` | no | SASL username (empty = no auth) |
+| `KAFKA_PASSWORD` | no | SASL password |
+| `KAFKA_SASL_MECHANISM` | no | SASL mechanism (default: `SCRAM-SHA-512`) |
+| `KAFKA_SECURITY_PROTOCOL` | no | Security protocol (default: `SASL_PLAINTEXT`) |
+| `CASSANDRA_CONTACT_POINTS` | no | Cassandra host (default: `localhost`) |
+| `CASSANDRA_PORT` | no | Cassandra port (default: `9042`) |
+| `CASSANDRA_USERNAME` | no | Cassandra username (empty = no auth) |
+| `CASSANDRA_PASSWORD` | no | Cassandra password |
+| `ORGANIZATION_ID` | no | Organization UUID |
+| `RATE_LIMIT_DEFAULT` | no | Global rate limit (default: `120/minute`) |
+| `RATE_LIMIT_AUTH` | no | Auth endpoint rate limit (default: `10/minute`) |
+| `OTLP_ENDPOINT` | no | OpenTelemetry exporter (empty = disabled) |
+| `OTLP_SERVICE_NAME` | no | Service name for tracing (default: `cenotoo-api`) |
+
+---
 
 ## Project Structure
 
@@ -96,21 +136,23 @@ All configuration is via environment variables. See `.env.example` for the full 
 ├── main.py              # FastAPI app entry point
 ├── config.py            # Settings (pydantic-settings)
 ├── dependencies.py      # Auth dependencies (JWT + API key)
-├── api/                 # API version assembly
-│   └── v1.py            #   All v1 routers assembled here
+├── api/
+│   └── v1.py            # All v1 routers assembled here
 ├── core/                # Framework layer
 │   ├── exceptions.py    #   Custom exception hierarchy
-│   ├── validators.py    #   Input validation (CQL identifiers, special chars)
-│   ├── filters.py       #   CQL filter generation with injection protection
+│   ├── validators.py    #   CQL identifier + special-char validation
+│   ├── filters.py       #   CQL filter generation (injection-safe)
 │   ├── aggregation.py   #   Time-series aggregation (pandas)
 │   ├── middleware.py     #   Request logging middleware
-│   └── tracing.py       #   OpenTelemetry setup (opt-in via OTLP_ENDPOINT)
-├── routers/             # API route handlers
+│   └── tracing.py       #   OpenTelemetry setup
+├── routers/             # HTTP route handlers (one file per resource)
 ├── services/            # Business logic layer
 ├── models/              # Pydantic request/response models
-├── utilities/           # DB connectors, Kafka helpers
-└── tests/               # pytest test suite
+├── utilities/           # Cassandra + Kafka connectors and CRUD helpers
+└── tests/               # 456 pytest tests (no infrastructure required)
 ```
+
+---
 
 ## Testing
 
@@ -118,18 +160,9 @@ All configuration is via environment variables. See `.env.example` for the full 
 make test
 ```
 
-Tests mock Cassandra and Kafka — no infrastructure required.
+All 456 tests mock Cassandra and Kafka — no running infrastructure needed.
 
-## Features
-
-- **Rate Limiting**: Configurable via `RATE_LIMIT_DEFAULT` and `RATE_LIMIT_AUTH` env vars (powered by slowapi)
-- **OpenTelemetry Tracing**: Opt-in by setting `OTLP_ENDPOINT` (install extra: `pip install -e ".[tracing]"`)
-- **Pagination**: All list endpoints return `PaginatedResponse` with `items`, `total`, `offset`, `limit`
-- **API Versioning**: All endpoints under `/api/v1` prefix, ready for future versions
-- **SASL Authentication**: Kafka and Cassandra auth configured via environment variables
-- **SSE Real-time Streaming**: `GET /projects/{pid}/collections/{cid}/stream` streams live Kafka messages to connected clients as Server-Sent Events; supports JWT and API key auth, sends keepalive comments to prevent proxy timeouts
-- **Device Management**: Full device registry with `POST/GET/PUT/DELETE /projects/{pid}/devices` and a device shadow/twin system (`GET /shadow`, `PUT /shadow/desired`, `PUT /shadow/reported`) including automatic delta computation between reported and desired state
-- **Schema Evolution**: `PATCH /projects/{pid}/collections/{cid}/schema` adds or removes Cassandra columns on live tables without recreating them; validates types against the supported type map and rejects system fields (`key`, `timestamp`, `day`)
+---
 
 ## Organization Setup Guide
 
