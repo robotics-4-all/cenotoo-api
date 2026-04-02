@@ -236,14 +236,14 @@ def verify_write_access(
 def verify_api_key_access(
     project_id: uuid.UUID,
     roles: list[str] | None = None,
-    api_key: HTTPAuthorizationCredentials | None = Depends(header_scheme),
+    api_key: str | None = Depends(header_scheme),
 ):
     """Verify API key access with specific role requirements.
 
     Args:
         project_id: The project UUID being accessed.
         roles: List of acceptable API key roles (defaults to all).
-        api_key: The API key from request header.
+        api_key: The API key from request header (raw string from X-API-Key header).
 
     Returns:
         True if API key is valid and has required permissions.
@@ -253,7 +253,7 @@ def verify_api_key_access(
     """
     if roles is None:
         roles = ["master", "read", "write"]
-    key_type, key_project_id = validate_api_key(api_key.credentials if api_key else "", project_id)
+    key_type, key_project_id = validate_api_key(api_key if api_key else "", project_id)
     return check_api_key(key_type, key_project_id, project_id, roles)
 
 

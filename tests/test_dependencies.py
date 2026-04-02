@@ -257,9 +257,7 @@ class TestVerifyApiKeyAccess:
         mock_check.return_value = True
         from dependencies import verify_api_key_access
 
-        api_key_mock = MagicMock()
-        api_key_mock.credentials = "test-key"
-        result = verify_api_key_access(pid, ["master"], api_key_mock)
+        result = verify_api_key_access(pid, ["master"], "test-key")
         assert result is True
         mock_validate.assert_called_once_with("test-key", pid)
         mock_check.assert_called_once_with("master", pid, pid, ["master"])
@@ -273,9 +271,7 @@ class TestVerifyApiKeyAccess:
         mock_check.return_value = True
         from dependencies import verify_api_key_access
 
-        api_key_mock = MagicMock()
-        api_key_mock.credentials = "test-key"
-        result = verify_api_key_access(pid, None, api_key_mock)
+        result = verify_api_key_access(pid, None, "test-key")
         assert result is True
         mock_check.assert_called_once_with("read", pid, pid, ["master", "read", "write"])
 
