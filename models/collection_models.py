@@ -43,6 +43,17 @@ class SchemaEvolutionRequest(BaseModel):
     remove_fields: list[str] = []
 
 
+class CollectionMetricsResponse(BaseModel):
+    collection_id: uuid.UUID
+    collection_name: str
+    project_id: uuid.UUID
+    kafka_topic: str
+    schema_fields: dict
+    record_count: int | None
+    record_count_limit: int
+    last_ingested_at: str | None
+
+
 class CollectionResponse(BaseModel):
     """Response model for collection information.
 

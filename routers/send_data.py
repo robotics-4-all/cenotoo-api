@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 
 from dependencies import (
     check_project_exists,
@@ -19,6 +19,7 @@ from utilities.collection_utils import (
 from utilities.kafka_connector import get_kafka_producer
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
+from utilities.rule_utils import evaluate_and_fire_rules
 
 logger = logging.getLogger(__name__)
 flush_threshold = 1
@@ -128,6 +129,7 @@ def validate_message_against_simple_schema(
 async def send_data_to_collection(
     project_id: uuid.UUID,
     collection_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     data: dict | list[dict] = Body(...),
 ):
     """Validate and send data to a collection's Kafka topic."""
@@ -235,6 +237,10 @@ async def send_data_to_collection(
 
     kafka_producer.flush()
     await insert_data_into_table(organization_name, project_name, collection_name, valid_messages)
+
+    background_tasks.add_task(
+        evaluate_and_fire_rules, project_id, collection_id, organization_id, valid_messages
+    )
 
     return {
         "message": f"Data sent to collection '{collection_name}' successfully.",

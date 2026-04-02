@@ -14,12 +14,15 @@ from routers import (
     cross_collection_jobs,
     delete_data,
     devices,
+    export_data,
     flink_jobs,
     get_data,
     get_data_stats,
+    import_data,
     organization,
     project,
     project_keys,
+    rules,
     send_data,
     stream_data,
     users,
@@ -42,3 +45,6 @@ router.include_router(cross_collection_jobs.router)
 router.include_router(users.router)
 router.include_router(stream_data.router)
 router.include_router(devices.router)
+router.include_router(export_data.router)
+router.include_router(import_data.router)
+router.include_router(rules.router)

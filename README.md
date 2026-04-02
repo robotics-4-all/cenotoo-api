@@ -41,6 +41,10 @@
 | **Rate Limiting** | all endpoints | Configurable per-endpoint limits via `slowapi` |
 | **OpenTelemetry** | — | Opt-in distributed tracing via `OTLP_ENDPOINT` env var |
 | **Pagination** | all list endpoints | `PaginatedResponse` with `items`, `total`, `offset`, `limit` |
+| **Collection Metrics** | `GET /metrics` | Health, record count, and last ingested timestamp |
+| **Data Export** | `GET /export` | Download collection data in CSV or Parquet format |
+| **Bulk Import** | `POST /import` | Upload CSV or JSON files with partial success handling |
+| **Webhooks & Alerts** | `CRUD /rules` | Trigger HTTP webhooks based on data thresholds |
 
 ---
 
