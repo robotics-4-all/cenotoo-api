@@ -114,7 +114,7 @@ async def import_data(
 
         if "timestamp" not in message:
             message["timestamp"] = datetime.datetime.now(datetime.UTC).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
+                "%Y-%m-%dT%H:%M:%S.%fZ"
             )
 
         try:
