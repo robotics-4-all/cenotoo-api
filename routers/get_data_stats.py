@@ -9,9 +9,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from config import settings
+from core.aggregation import aggregate_data
 from core.filters import generate_filter_condition_parameterized
 from dependencies import (
-    aggregate_data,
     check_project_exists,
     generate_filter_condition,
     get_organization_id,
@@ -74,7 +74,9 @@ async def get_collection_statistics(
         enum=["avg", "max", "min", "sum", "count", "distinct", "p50", "p90", "p95", "p99"],
         description="Statistical operation to perform",
     ),
-    interval: str = "every_2_days",
+    interval: str | None = Query(
+        None, description="Interval for time bucketing, e.g. every_1_hours"
+    ),
     start_time: str = Query(None, description="Start time in format YYYY-MM-DDTHH:MM:SSZ"),
     end_time: str = Query(None, description="End time in format YYYY-MM-DDTHH:MM:SSZ"),
     filters: str | None = Query(None),
