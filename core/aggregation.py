@@ -57,6 +57,8 @@ def get_interval_start(timestamp, reference_time, interval_unit, interval_value=
 def aggregate_data(data, interval_value, interval_unit, stat, attribute, group_by):
     """Aggregate time-series data based on specified intervals and statistics."""
     df = pd.DataFrame(data)
+    if df.empty:
+        return []
     df["timestamp"] = pd.to_datetime(df["timestamp"])
 
     if attribute in df.columns:
