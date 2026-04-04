@@ -14,7 +14,6 @@ from utilities.collection_utils import (
     check_collection_exists,
     fetch_collection_schema,
     get_collection_by_id,
-    insert_data_into_table,
 )
 from utilities.kafka_connector import get_kafka_producer
 from utilities.organization_utils import get_organization_by_id
@@ -236,7 +235,6 @@ async def send_data_to_collection(
             kafka_producer.flush()
 
     kafka_producer.flush()
-    await insert_data_into_table(organization_name, project_name, collection_name, valid_messages)
 
     background_tasks.add_task(
         evaluate_and_fire_rules, project_id, collection_id, organization_id, valid_messages

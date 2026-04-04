@@ -24,6 +24,7 @@ from routers import (
     project_keys,
     rules,
     send_data,
+    store_data,
     stream_data,
     users,
 )
@@ -37,6 +38,7 @@ router.include_router(project_keys.router)
 router.include_router(collections.router)
 router.include_router(collection_keys.router)
 router.include_router(send_data.router)
+router.include_router(store_data.router)
 router.include_router(get_data.router)
 router.include_router(delete_data.router)
 router.include_router(get_data_stats.router)
