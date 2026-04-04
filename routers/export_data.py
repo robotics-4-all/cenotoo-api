@@ -1,3 +1,4 @@
+import datetime
 import io
 import logging
 import uuid
@@ -68,6 +69,15 @@ def export_data(
                 value = row[i]
                 if hasattr(value, "__class__") and "Decimal" in value.__class__.__name__:
                     value = float(value)
+                elif isinstance(value, (datetime.datetime, datetime.date)):
+                    value = value.isoformat()
+                elif (
+                    not isinstance(value, (bool, int, float, str, type(None), uuid.UUID))
+                    and hasattr(value, "__class__")
+                    and "Date" in value.__class__.__name__
+                ):
+                    # cassandra.util.Date — str() returns ISO-8601 date string
+                    value = str(value)
                 row_dict[column_name] = value
             all_results.append(row_dict)
 
