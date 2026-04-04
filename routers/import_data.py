@@ -113,9 +113,8 @@ async def import_data(
             message["key"] = "key"
 
         if "timestamp" not in message:
-            message["timestamp"] = datetime.datetime.now(datetime.UTC).strftime(
-                "%Y-%m-%dT%H:%M:%S.%fZ"
-            )
+            ts = datetime.datetime.now(datetime.UTC) + datetime.timedelta(microseconds=i)
+            message["timestamp"] = ts.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         try:
             timestamp_dt = datetime.datetime.fromisoformat(
