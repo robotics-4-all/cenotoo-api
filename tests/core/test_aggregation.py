@@ -4,6 +4,8 @@ import pytest
 
 from core.aggregation import aggregate_data, get_interval_start
 
+_BASE = datetime(2024, 1, 15, 14, 45, 30)
+
 
 class TestGetIntervalStart:
     """Tests for get_interval_start."""
@@ -135,3 +137,97 @@ class TestAggregateData:
         """Verify that a missing group-by column raises a KeyError."""
         with pytest.raises(KeyError, match="does not exist"):
             aggregate_data(sample_data, 5, "minutes", "avg", "value", "nonexistent")
+
+    def test_p50_aggregation(self):
+        data = [
+            {
+                "timestamp": (datetime(2024, 1, 1) + timedelta(minutes=i)).isoformat(),
+                "sensor": "s1",
+                "value": float(i),
+            }
+            for i in range(10)
+        ]
+        result = aggregate_data(data, 60, "minutes", "p50", "value", "sensor")
+        assert len(result) > 0
+        assert any("p50_value" in r for r in result)
+        assert result[0]["p50_value"] is not None
+
+    def test_p90_aggregation(self):
+        data = [
+            {
+                "timestamp": (datetime(2024, 1, 1) + timedelta(minutes=i)).isoformat(),
+                "sensor": "s1",
+                "value": float(i),
+            }
+            for i in range(10)
+        ]
+        result = aggregate_data(data, 60, "minutes", "p90", "value", "sensor")
+        assert any("p90_value" in r for r in result)
+        assert result[0]["p90_value"] is not None
+
+    def test_p95_aggregation(self):
+        data = [
+            {
+                "timestamp": (datetime(2024, 1, 1) + timedelta(minutes=i)).isoformat(),
+                "sensor": "s1",
+                "value": float(i),
+            }
+            for i in range(10)
+        ]
+        result = aggregate_data(data, 60, "minutes", "p95", "value", "sensor")
+        assert any("p95_value" in r for r in result)
+        assert result[0]["p95_value"] is not None
+
+    def test_p99_aggregation(self):
+        data = [
+            {
+                "timestamp": (datetime(2024, 1, 1) + timedelta(minutes=i)).isoformat(),
+                "sensor": "s1",
+                "value": float(i),
+            }
+            for i in range(10)
+        ]
+        result = aggregate_data(data, 60, "minutes", "p99", "value", "sensor")
+        assert any("p99_value" in r for r in result)
+        assert result[0]["p99_value"] is not None
+
+    def test_days_reference_anchors_to_midnight(self):
+        data = [
+            {"timestamp": datetime(2024, 1, 15, 14, 30).isoformat(), "sensor": "s1", "value": 1.0},
+            {"timestamp": datetime(2024, 1, 15, 15, 30).isoformat(), "sensor": "s1", "value": 2.0},
+        ]
+        result = aggregate_data(data, 1, "days", "avg", "value", "sensor")
+        assert len(result) == 1
+        interval_start = result[0]["interval_start"]
+        assert interval_start.hour == 0
+        assert interval_start.minute == 0
+        assert interval_start.second == 0
+
+    def test_hours_reference_anchors_to_hour_boundary(self):
+        data = [
+            {"timestamp": datetime(2024, 1, 15, 14, 45).isoformat(), "sensor": "s1", "value": 1.0},
+            {"timestamp": datetime(2024, 1, 15, 14, 55).isoformat(), "sensor": "s1", "value": 2.0},
+        ]
+        result = aggregate_data(data, 1, "hours", "avg", "value", "sensor")
+        assert len(result) == 1
+        interval_start = result[0]["interval_start"]
+        assert interval_start.hour == 14
+        assert interval_start.minute == 0
+
+    def test_weeks_reference_anchors_to_monday(self):
+        data = [
+            {"timestamp": datetime(2024, 1, 17, 10, 0).isoformat(), "sensor": "s1", "value": 1.0},
+        ]
+        result = aggregate_data(data, 1, "weeks", "avg", "value", "sensor")
+        assert len(result) == 1
+        interval_start = result[0]["interval_start"]
+        assert interval_start.weekday() == 0
+
+    def test_months_reference_anchors_to_first(self):
+        data = [
+            {"timestamp": datetime(2024, 1, 15, 10, 0).isoformat(), "sensor": "s1", "value": 1.0},
+        ]
+        result = aggregate_data(data, 1, "months", "avg", "value", "sensor")
+        assert len(result) == 1
+        interval_start = result[0]["interval_start"]
+        assert interval_start.day == 1

@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     otlp_endpoint: str = ""
     otlp_service_name: str = "cenotoo-api"
 
+    max_stats_rows: int = 500_000
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

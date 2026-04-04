@@ -5,6 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import routers.get_data_stats as _stats_module
+
 
 class TestGetDataStatsEndpoints:
     """Tests for the get data stats endpoints."""
@@ -14,6 +16,7 @@ class TestGetDataStatsEndpoints:
     @pytest.fixture(autouse=True)
     def _patch_router_deps(self, sample_org_id):
         self.mock_session = MagicMock()
+        _stats_module._schema_cache.clear()
         with (
             patch(
                 "routers.get_data_stats.get_organization_id",
@@ -567,3 +570,112 @@ class TestGetDataStatsEndpoints:
         )
         assert response.status_code == 500
         assert "Failed to retrieve distinct values" in response.json()["detail"]
+
+    @patch("routers.get_data_stats.get_collection_by_id")
+    @patch("routers.get_data_stats.get_project_by_id")
+    @patch("routers.get_data_stats.get_organization_by_id")
+    def test_stats_distinct_row_cap_raises_400(
+        self,
+        mock_org,
+        mock_proj,
+        mock_coll,
+        client,
+        sample_project_id,
+        sample_collection_id,
+    ):
+        """Verify distinct path returns 400 when row cap is hit."""
+        self._setup_name_mocks(mock_org, mock_proj, mock_coll)
+
+        from config import settings
+
+        DataRow = namedtuple("DataRow", ["key", "temperature", "timestamp"])
+        cap = settings.max_stats_rows
+        data_rows = [
+            DataRow(key="sensor1", temperature=25.0, timestamp=datetime(2024, 1, 1, 10, 0))
+        ] * cap
+
+        self.mock_session.execute.return_value = data_rows
+
+        response = client.get(
+            f"/api/v1/projects/{sample_project_id}/collections/{sample_collection_id}/statistics",
+            params={
+                "attribute": "temperature",
+                "stat": "distinct",
+            },
+        )
+        assert response.status_code == 400
+        assert "Result set too large" in response.json()["detail"]
+
+    @patch("routers.get_data_stats.get_collection_by_id")
+    @patch("routers.get_data_stats.get_project_by_id")
+    @patch("routers.get_data_stats.get_organization_by_id")
+    @patch("routers.get_data_stats.aggregate_data")
+    def test_stats_distinct_with_interval_returns_interval_buckets(
+        self,
+        mock_aggregate,
+        mock_org,
+        mock_proj,
+        mock_coll,
+        client,
+        sample_project_id,
+        sample_collection_id,
+    ):
+        """Verify distinct with interval returns interval_buckets list."""
+        self._setup_name_mocks(mock_org, mock_proj, mock_coll)
+
+        DataRow = namedtuple("DataRow", ["key", "temperature", "timestamp"])
+        data_rows = [
+            DataRow(key="sensor1", temperature=25.0, timestamp=datetime(2024, 1, 1, 10, 0)),
+            DataRow(key="sensor1", temperature=26.0, timestamp=datetime(2024, 1, 2, 10, 0)),
+        ]
+        self.mock_session.execute.return_value = data_rows
+
+        mock_aggregate.return_value = [
+            {"key": "sensor1", "interval_start": datetime(2024, 1, 1), "distinct_temperature": 1}
+        ]
+
+        response = client.get(
+            f"/api/v1/projects/{sample_project_id}/collections/{sample_collection_id}/statistics",
+            params={
+                "attribute": "temperature",
+                "stat": "distinct",
+                "interval": "every_1_days",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "interval_buckets" in data
+        assert isinstance(data["interval_buckets"], list)
+
+    @patch("routers.get_data_stats.get_collection_by_id")
+    @patch("routers.get_data_stats.get_project_by_id")
+    @patch("routers.get_data_stats.get_organization_by_id")
+    def test_stats_distinct_without_interval_has_no_interval_buckets(
+        self,
+        mock_org,
+        mock_proj,
+        mock_coll,
+        client,
+        sample_project_id,
+        sample_collection_id,
+    ):
+        """Verify distinct without interval has interval_buckets as None."""
+        self._setup_name_mocks(mock_org, mock_proj, mock_coll)
+
+        DataRow = namedtuple("DataRow", ["key", "temperature", "timestamp"])
+        data_rows = [
+            DataRow(key="sensor1", temperature=25.0, timestamp=datetime(2024, 1, 1, 10, 0)),
+        ]
+        self.mock_session.execute.return_value = data_rows
+
+        response = client.get(
+            f"/api/v1/projects/{sample_project_id}/collections/{sample_collection_id}/statistics",
+            params={
+                "attribute": "temperature",
+                "stat": "distinct",
+                "interval": "",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["interval_buckets"] is None

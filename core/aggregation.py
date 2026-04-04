@@ -3,6 +3,8 @@ from datetime import timedelta
 import numpy as np
 import pandas as pd
 
+_PERCENTILE_STATS = {"p50": 0.50, "p90": 0.90, "p95": 0.95, "p99": 0.99}
+
 
 def get_interval_start(timestamp, reference_time, interval_unit, interval_value=1):
     """Calculate the start time of an interval for a given timestamp."""
@@ -63,7 +65,19 @@ def aggregate_data(data, interval_value, interval_unit, stat, attribute, group_b
     if group_by not in df.columns:
         raise KeyError(f"The column '{group_by}' does not exist in the data.")
 
-    reference_time = df["timestamp"].min()
+    reference_time = df["timestamp"].min().to_pydatetime()
+
+    unit = interval_unit.lower()
+    if unit in ("days", "day"):
+        reference_time = reference_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif unit in ("hours", "hour"):
+        reference_time = reference_time.replace(minute=0, second=0, microsecond=0)
+    elif unit in ("weeks", "week"):
+        reference_time = (reference_time - timedelta(days=reference_time.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+    elif unit in ("months", "month"):
+        reference_time = reference_time.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     df["interval_start"] = df.apply(
         lambda row: get_interval_start(
@@ -78,6 +92,18 @@ def aggregate_data(data, interval_value, interval_unit, stat, attribute, group_b
     if stat == "distinct":
         grouped = df.groupby([group_by, "interval_start"])[attribute].nunique().reset_index()
         grouped.rename(columns={attribute: f"distinct_{attribute}"}, inplace=True)
+        return grouped.to_dict(orient="records")
+
+    if stat in _PERCENTILE_STATS:
+        q = _PERCENTILE_STATS[stat]
+        grouped = (
+            df.groupby([group_by, "interval_start"])
+            .agg({attribute: lambda x, _q=q: x.quantile(_q)})
+            .reset_index()
+        )
+        grouped.rename(columns={attribute: f"{stat}_{attribute}"}, inplace=True)
+        grouped[f"{stat}_{attribute}"] = grouped[f"{stat}_{attribute}"].round(3)
+        grouped = grouped.replace([float("inf"), float("-inf"), np.nan, pd.NA], None)
         return grouped.to_dict(orient="records")
 
     agg_func = {

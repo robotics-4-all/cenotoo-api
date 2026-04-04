@@ -71,3 +71,29 @@ def generate_filter_condition(prop_name: str, operator: str, prop_value: Any) ->
         return f"{quoted_name} NOT CONTAINS '{escape_cql_string(str(prop_value))}'"
 
     return ""
+
+
+def generate_filter_condition_parameterized(
+    prop_name: str, operator: str, prop_value: Any
+) -> tuple[str, list]:
+    if operator not in _VALID_OPERATORS:
+        return "", []
+
+    _validate_column_name(prop_name)
+    quoted_name = f'"{prop_name}"'
+
+    if operator in _COMPARISON_SYMBOLS:
+        symbol = _COMPARISON_SYMBOLS[operator]
+        return f"{quoted_name} {symbol} %s", [prop_value]
+
+    if operator == "in":
+        placeholders = ", ".join(["%s"] * len(prop_value))
+        return f"{quoted_name} IN ({placeholders})", list(prop_value)
+
+    if operator == "contains":
+        return f"{quoted_name} CONTAINS %s", [prop_value]
+
+    if operator == "not_contains":
+        return f"{quoted_name} NOT CONTAINS %s", [prop_value]
+
+    return "", []
