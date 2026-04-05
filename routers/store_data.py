@@ -99,6 +99,7 @@ async def store_data_to_collection(
         final_is_valid, final_error = validate_message_against_simple_schema(message, schema)
 
         if final_is_valid:
+            message["id"] = str(uuid.uuid4())
             valid_messages.append(message)
         else:
             invalid_messages.append(

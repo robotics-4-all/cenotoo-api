@@ -105,7 +105,7 @@ async def fetch_collection_by_name(
     return session.execute(query, (collection_name, project_id, organization_id)).one()
 
 
-SYSTEM_FIELDS = {"key", "timestamp", "day"}
+SYSTEM_FIELDS = {"key", "timestamp", "day", "id"}
 
 
 async def fetch_collection_schema(organization_name: str, project_name: str, collection_name: str):
@@ -165,6 +165,7 @@ async def create_cassandra_table(
     flattened_schema = flatten_object(data.collection_schema)
     flattened_schema["timestamp"] = "TIMESTAMP"
     flattened_schema["day"] = "DATE"
+    flattened_schema["id"] = "UUID"
     # Check for key column, if not present add it
     has_key = any(key.lower() == "key" for key in flattened_schema)
     if not has_key:
@@ -172,7 +173,7 @@ async def create_cassandra_table(
     columns = ", ".join(
         [f'"{col_name}" {col_type}' for col_name, col_type in flattened_schema.items()]
     )
-    primary_key = "((day, key), timestamp)"
+    primary_key = "((day, key), timestamp, id)"
     create_table_query = f"""
     CREATE TABLE IF NOT EXISTS {keyspace_name}.{table_name} (
         {columns},
