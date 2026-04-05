@@ -1,15 +1,16 @@
 """Organization database utility functions.
 
 This module provides utility functions for CRUD operations on organizations
-in the Cassandra database.
+in the PostgreSQL database. Cassandra keyspace operations (for IoT data)
+are kept using the Cassandra session.
 """
 
 import uuid
 from typing import Any
 
 from utilities.cassandra_connector import get_cassandra_session
+from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
 
-session = get_cassandra_session()
 
 # Insert a new organization into the database
 
@@ -21,10 +22,10 @@ async def insert_organization(org_id, data):
         org_id: UUID for the new organization.
         data: OrganizationCreateRequest with organization details.
     """
-    session.execute(
+    pg_execute(
         """
         INSERT INTO organization (id, organization_name, description, creation_date, tags)
-        VALUES (%s, %s, %s, toTimestamp(now()), %s)
+        VALUES (%s, %s, %s, NOW(), %s)
         """,
         (org_id, data.organization_name, data.description, data.tags),
     )
@@ -42,11 +43,11 @@ def get_organization_by_id(org_id):
     Returns:
         Organization record from database.
     """
-    query = (
+    return pg_fetchone(
         "SELECT id, organization_name, description, creation_date, tags "
-        "FROM organization WHERE id=%s LIMIT 1"
+        "FROM organization WHERE id = %s",
+        (org_id,),
     )
-    return session.execute(query, (org_id,)).one()
 
 
 # Update an organization in the database
@@ -85,7 +86,7 @@ async def update_organization_in_db(
     update_values.append(org_id)
 
     query = f"UPDATE organization SET {', '.join(update_fields)} WHERE id=%s"
-    session.execute(query, tuple(update_values))
+    pg_execute(query, tuple(update_values))
     return {"message": "Organization updated successfully"}
 
 
@@ -98,11 +99,10 @@ async def delete_organization_from_db(org_id: uuid.UUID):
     Args:
         org_id: UUID of the organization to delete.
     """
-    query = "DELETE FROM organization WHERE id=%s"
-    session.execute(query, (org_id,))
+    pg_execute("DELETE FROM organization WHERE id=%s", (org_id,))
 
 
-# Create a keyspace in the database
+# Create a keyspace in the database (Cassandra — for IoT data)
 
 
 async def create_keyspace_in_db(organization_name: str):
@@ -111,6 +111,7 @@ async def create_keyspace_in_db(organization_name: str):
     Args:
         organization_name: Name of the organization (spaces will be replaced with underscores).
     """
+    session = get_cassandra_session()
     # Transform organization name: replace spaces with underscores
     keyspace_name = organization_name.replace(" ", "_")
 
@@ -129,7 +130,7 @@ async def create_keyspace_in_db(organization_name: str):
     session.execute(query)
 
 
-# Delete a keyspace from the database
+# Delete a keyspace from the database (Cassandra — for IoT data)
 
 
 async def delete_keyspace_in_db(organization_name: str):
@@ -138,6 +139,7 @@ async def delete_keyspace_in_db(organization_name: str):
     Args:
         organization_name: Name of the organization (spaces will be replaced with underscores).
     """
+    session = get_cassandra_session()
     # Transform organization name: replace spaces with underscores
     keyspace_name = organization_name.replace(" ", "_")
 
@@ -157,12 +159,12 @@ async def get_all_organizations_from_db():
     Returns:
         List of all organization records.
     """
-    query = "SELECT id, organization_name, description, creation_date, tags FROM organization"
-    organizations = session.execute(query).all()
-    return organizations
+    return pg_fetchall(
+        "SELECT id, organization_name, description, creation_date, tags FROM organization"
+    )
 
 
-# Fetch an organization by its name (ignoring case sensitivity)
+# Fetch an organization by its name
 
 
 async def get_organization_by_name(organization_name: str):
@@ -174,6 +176,7 @@ async def get_organization_by_name(organization_name: str):
     Returns:
         Organization record with matching name.
     """
-    query = "SELECT id FROM organization WHERE organization_name=%s LIMIT 1 ALLOW FILTERING"
-    result = session.execute(query, (organization_name,)).one()
-    return result
+    return pg_fetchone(
+        "SELECT id FROM organization WHERE organization_name=%s",
+        (organization_name,),
+    )
