@@ -62,6 +62,7 @@ def export_data(
 
     try:
         results = session.execute(query)
+        column_names = list(results.column_names)
         all_results = []
         for row in results:
             row_dict = {}
@@ -69,21 +70,22 @@ def export_data(
                 value = row[i]
                 if hasattr(value, "__class__") and "Decimal" in value.__class__.__name__:
                     value = float(value)
+                elif isinstance(value, uuid.UUID):
+                    value = str(value)
                 elif isinstance(value, (datetime.datetime, datetime.date)):
                     value = value.isoformat()
                 elif (
-                    not isinstance(value, (bool, int, float, str, type(None), uuid.UUID))
+                    not isinstance(value, (bool, int, float, str, type(None)))
                     and hasattr(value, "__class__")
                     and "Date" in value.__class__.__name__
                 ):
-                    # cassandra.util.Date — str() returns ISO-8601 date string
                     value = str(value)
                 row_dict[column_name] = value
             all_results.append(row_dict)
 
         all_results = all_results[offset:]
 
-        df = pd.DataFrame(all_results)
+        df = pd.DataFrame(all_results, columns=column_names if not all_results else None)
 
         if format == "csv":
             buf = io.StringIO()
