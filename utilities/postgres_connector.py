@@ -11,6 +11,8 @@ import psycopg2
 import psycopg2.extras
 import psycopg2.pool
 
+psycopg2.extras.register_uuid()
+
 from config import settings
 
 logger = logging.getLogger(__name__)

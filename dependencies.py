@@ -16,8 +16,8 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, OAuth2P
 
 from config import settings
 from services.auth_service import verify_jwt_token
-from utilities.cassandra_connector import get_cassandra_session
 from utilities.organization_utils import get_organization_by_id
+from utilities.postgres_connector import pg_fetchone
 from utilities.project_keys_utils import hash_api_key
 from utilities.project_utils import get_project_by_id
 from utilities.user_utils import get_user_by_username
@@ -67,13 +67,11 @@ def validate_api_key(api_key: str, project_id: uuid.UUID):
     """
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key is required")
-    query = (
-        "SELECT key_type, project_id FROM api_keys "
-        "WHERE api_key=%s AND project_id=%s LIMIT 1 allow filtering"
-    )
-    session = get_cassandra_session()
     try:
-        key_data = session.execute(query, (hash_api_key(api_key), project_id)).one()
+        key_data = pg_fetchone(
+            "SELECT key_type, project_id FROM api_keys WHERE api_key=%s AND project_id=%s",
+            (hash_api_key(api_key), project_id),
+        )
         if key_data:
             return key_data.key_type, key_data.project_id
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
