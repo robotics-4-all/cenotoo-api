@@ -50,6 +50,16 @@ async def ready() -> dict[str, Any] | Response:
         all_ok = False
 
     try:
+        from utilities.postgres_connector import pg_fetchone
+
+        pg_fetchone("SELECT 1")
+        checks["postgres"] = "ok"
+    except Exception as e:
+        logger.warning("Readiness: PostgreSQL check failed: %s", e)
+        checks["postgres"] = f"error: {e}"
+        all_ok = False
+
+    try:
         from confluent_kafka import Consumer
 
         conf = {"bootstrap.servers": settings.kafka_brokers, "group.id": "cenotoo-health"}

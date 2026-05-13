@@ -11,6 +11,7 @@ from dependencies import get_organization_id
 from models.collection_models import CollectionCreateRequest, CollectionUpdateRequest
 from utilities.cassandra_connector import get_cassandra_session
 from utilities.kafka_connector import get_kafka_admin_client
+from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
 from utilities.schema_utils import (
@@ -33,12 +34,11 @@ def get_collection_by_id(
     collection_id: uuid.UUID, project_id: uuid.UUID, organization_id: uuid.UUID
 ):
     """Return a collection by its ID."""
-    query = (
+    return pg_fetchone(
         "SELECT id, collection_name, description, tags, creation_date, project_id, organization_id "
-        "FROM collection WHERE id=%s AND project_id=%s AND organization_id=%s "
-        "LIMIT 1 ALLOW FILTERING"
+        "FROM collection WHERE id=%s AND project_id=%s AND organization_id=%s",
+        (collection_id, project_id, organization_id),
     )
-    return session.execute(query, (collection_id, project_id, organization_id)).one()
 
 
 # Insert a new collection into the database
@@ -48,14 +48,14 @@ async def insert_collection(
     organization_id: uuid.UUID, project_id: uuid.UUID, data: CollectionCreateRequest
 ):
     """Insert a new collection into the database."""
-    query = """
-    INSERT INTO collection (id, collection_name, creation_date, description,
-    organization_id, project_id, tags)
-    VALUES (%s, %s, toTimestamp(now()), %s, %s, %s, %s)
-    """
     collection_id = uuid.uuid4()
-    session.execute(
-        query, (collection_id, data.name, data.description, organization_id, project_id, data.tags)
+    pg_execute(
+        """
+        INSERT INTO collection (id, collection_name, creation_date, description,
+        organization_id, project_id, tags)
+        VALUES (%s, %s, NOW(), %s, %s, %s, %s)
+        """,
+        (collection_id, data.name, data.description, organization_id, project_id, data.tags),
     )
     return collection_id
 
@@ -79,7 +79,7 @@ async def update_collection_in_db(collection_id: uuid.UUID, data: CollectionUpda
     update_query = update_query.rstrip(", ") + " WHERE id=%s"
     update_params.append(collection_id)
 
-    session.execute(update_query, tuple(update_params))
+    pg_execute(update_query, tuple(update_params))
 
 
 # Delete a collection from the database
@@ -87,22 +87,20 @@ async def update_collection_in_db(collection_id: uuid.UUID, data: CollectionUpda
 
 async def delete_collection_from_db(collection_id: uuid.UUID):
     """Delete a collection from the database."""
-    query = "DELETE FROM collection WHERE id=%s"
-    session.execute(query, (collection_id,))
+    pg_execute("DELETE FROM collection WHERE id=%s", (collection_id,))
 
 
-# Fetch a collection by its ID
+# Fetch a collection by its name
 
 
 async def fetch_collection_by_name(
     organization_id: uuid.UUID, project_id: uuid.UUID, collection_name: str
 ):
     """Fetch a collection by its name."""
-    query = (
-        "SELECT * FROM collection WHERE collection_name=%s AND project_id=%s "
-        "AND organization_id=%s ALLOW FILTERING"
+    return pg_fetchone(
+        "SELECT * FROM collection WHERE collection_name=%s AND project_id=%s AND organization_id=%s",
+        (collection_name, project_id, organization_id),
     )
-    return session.execute(query, (collection_name, project_id, organization_id)).one()
 
 
 SYSTEM_FIELDS = {"key", "timestamp", "day", "id"}
@@ -141,9 +139,10 @@ async def fetch_collection_schema(organization_name: str, project_name: str, col
 
 def fetch_all_collections(organization_id: uuid.UUID, project_id: uuid.UUID):
     """Fetch all collections for a project."""
-    query = "SELECT * FROM collection WHERE organization_id=%s AND project_id=%s ALLOW FILTERING"
-    rows = session.execute(query, (organization_id, project_id))
-    return rows.all()
+    return pg_fetchall(
+        "SELECT * FROM collection WHERE organization_id=%s AND project_id=%s",
+        (organization_id, project_id),
+    )
 
 
 # Create a Cassandra table for the collection

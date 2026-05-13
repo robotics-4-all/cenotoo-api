@@ -40,7 +40,7 @@ SchemaRow = namedtuple("SchemaRow", ["column_name", "type"])
 class TestGetCollectionById:
     """Tests for get_collection_by_id."""
 
-    def test_returns_row(self, mock_cassandra_session):
+    def test_returns_row(self):
         """Verify get_collection_by_id returns the expected collection row."""
         coll_id = uuid.uuid4()
         proj_id = uuid.uuid4()
@@ -54,18 +54,29 @@ class TestGetCollectionById:
             project_id=proj_id,
             organization_id=org_id,
         )
-        mock_cassandra_session.execute.return_value = MagicMock(one=MagicMock(return_value=row))
 
-        result = get_collection_by_id(coll_id, proj_id, org_id)
+        with patch("utilities.collection_utils.pg_fetchone", return_value=row):
+            result = get_collection_by_id(coll_id, proj_id, org_id)
 
         assert result == row
+
+    def test_returns_none_when_not_found(self):
+        """Verify get_collection_by_id returns None when collection does not exist."""
+        coll_id = uuid.uuid4()
+        proj_id = uuid.uuid4()
+        org_id = uuid.uuid4()
+
+        with patch("utilities.collection_utils.pg_fetchone", return_value=None):
+            result = get_collection_by_id(coll_id, proj_id, org_id)
+
+        assert result is None
 
 
 class TestInsertCollection:
     """Tests for insert_collection."""
 
     @pytest.mark.asyncio
-    async def test_returns_collection_id(self, mock_cassandra_session):
+    async def test_returns_collection_id(self):
         """Verify insert_collection successfully inserts and returns a collection ID."""
         org_id = uuid.uuid4()
         proj_id = uuid.uuid4()
@@ -76,70 +87,127 @@ class TestInsertCollection:
             collection_schema={"temp": 25.0},
         )
 
-        result = await insert_collection(org_id, proj_id, data)
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            result = await insert_collection(org_id, proj_id, data)
 
         assert isinstance(result, uuid.UUID)
-        mock_cassandra_session.execute.assert_called_once()
+        mock_exec.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_insert_query_contains_collection_name(self):
+        """Verify insert_collection uses INSERT INTO collection query."""
+        org_id = uuid.uuid4()
+        proj_id = uuid.uuid4()
+        data = CollectionCreateRequest(
+            name="sensors",
+            description="sensor data",
+            tags=[],
+            collection_schema={"temp": "float"},
+        )
+
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            await insert_collection(org_id, proj_id, data)
+
+        call_args = mock_exec.call_args[0]
+        assert "INSERT INTO collection" in call_args[0]
 
 
 class TestUpdateCollectionInDb:
     """Tests for update_collection_in_db."""
 
     @pytest.mark.asyncio
-    async def test_update_with_description(self, mock_cassandra_session):
+    async def test_update_with_description(self):
         """Verify update_collection_in_db updates description correctly."""
         coll_id = uuid.uuid4()
         data = CollectionUpdateRequest(description="new desc")
 
-        await update_collection_in_db(coll_id, data)
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            await update_collection_in_db(coll_id, data)
 
-        args = mock_cassandra_session.execute.call_args
-        assert "description=%s" in args[0][0]
+        args = mock_exec.call_args[0]
+        assert "description=%s" in args[0]
 
     @pytest.mark.asyncio
-    async def test_update_with_tags(self, mock_cassandra_session):
+    async def test_update_with_tags(self):
         """Verify update_collection_in_db updates tags correctly."""
         coll_id = uuid.uuid4()
         data = CollectionUpdateRequest(tags=["new_tag"])
 
-        await update_collection_in_db(coll_id, data)
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            await update_collection_in_db(coll_id, data)
 
-        args = mock_cassandra_session.execute.call_args
-        assert "tags=%s" in args[0][0]
+        args = mock_exec.call_args[0]
+        assert "tags=%s" in args[0]
+
+    @pytest.mark.asyncio
+    async def test_update_query_contains_where_id(self):
+        """Verify update_collection_in_db WHERE clause targets collection id."""
+        coll_id = uuid.uuid4()
+        data = CollectionUpdateRequest(description="updated")
+
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            await update_collection_in_db(coll_id, data)
+
+        args = mock_exec.call_args[0]
+        assert "WHERE id=%s" in args[0]
+        assert coll_id in args[1]
 
 
 class TestDeleteCollectionFromDb:
     """Tests for delete_collection_from_db."""
 
     @pytest.mark.asyncio
-    async def test_executes_delete(self, mock_cassandra_session):
-        """Verify delete_collection_from_db executes correct CQL query."""
+    async def test_executes_delete(self):
+        """Verify delete_collection_from_db executes correct SQL query."""
         coll_id = uuid.uuid4()
 
-        await delete_collection_from_db(coll_id)
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            await delete_collection_from_db(coll_id)
 
-        args = mock_cassandra_session.execute.call_args
-        assert "DELETE FROM collection" in args[0][0]
+        args = mock_exec.call_args[0]
+        assert "DELETE FROM collection" in args[0]
+
+    @pytest.mark.asyncio
+    async def test_delete_passes_collection_id(self):
+        """Verify delete_collection_from_db passes the collection ID as parameter."""
+        coll_id = uuid.uuid4()
+
+        with patch("utilities.collection_utils.pg_execute") as mock_exec:
+            await delete_collection_from_db(coll_id)
+
+        args = mock_exec.call_args[0]
+        assert coll_id in args[1]
 
 
 class TestFetchCollectionByName:
     """Tests for fetch_collection_by_name."""
 
     @pytest.mark.asyncio
-    async def test_returns_row(self, mock_cassandra_session):
+    async def test_returns_row(self):
         """Verify fetch_collection_by_name returns the expected collection row."""
         org_id = uuid.uuid4()
         proj_id = uuid.uuid4()
         row = MagicMock(collection_name="coll")
-        mock_cassandra_session.execute.return_value = MagicMock(one=MagicMock(return_value=row))
 
-        result = await fetch_collection_by_name(org_id, proj_id, "coll")
+        with patch("utilities.collection_utils.pg_fetchone", return_value=row):
+            result = await fetch_collection_by_name(org_id, proj_id, "coll")
 
         assert result == row
 
+    @pytest.mark.asyncio
+    async def test_returns_none_when_not_found(self):
+        """Verify fetch_collection_by_name returns None when not found."""
+        org_id = uuid.uuid4()
+        proj_id = uuid.uuid4()
+
+        with patch("utilities.collection_utils.pg_fetchone", return_value=None):
+            result = await fetch_collection_by_name(org_id, proj_id, "missing")
+
+        assert result is None
+
 
 class TestFetchCollectionSchema:
-    """Tests for fetch_collection_schema."""
+    """Tests for fetch_collection_schema — still uses Cassandra session."""
 
     @pytest.mark.asyncio
     async def test_exact_case_match(self, mock_cassandra_session):
@@ -172,25 +240,34 @@ class TestFetchCollectionSchema:
 class TestFetchAllCollections:
     """Tests for fetch_all_collections."""
 
-    def test_returns_rows(self, mock_cassandra_session):
+    def test_returns_rows(self):
         """Verify fetch_all_collections returns a list of collections."""
         org_id = uuid.uuid4()
         proj_id = uuid.uuid4()
         rows = [MagicMock(collection_name="c1"), MagicMock(collection_name="c2")]
-        mock_cassandra_session.execute.return_value = MagicMock(all=MagicMock(return_value=rows))
 
-        result = fetch_all_collections(org_id, proj_id)
+        with patch("utilities.collection_utils.pg_fetchall", return_value=rows):
+            result = fetch_all_collections(org_id, proj_id)
 
         assert result == rows
 
+    def test_returns_empty_list_when_none(self):
+        """Verify fetch_all_collections returns empty list when no collections exist."""
+        org_id = uuid.uuid4()
+        proj_id = uuid.uuid4()
+
+        with patch("utilities.collection_utils.pg_fetchall", return_value=[]):
+            result = fetch_all_collections(org_id, proj_id)
+
+        assert result == []
+
 
 class TestCreateCassandraTable:
-    """Tests for create_cassandra_table."""
+    """Tests for create_kafka_topic (Kafka topic creation)."""
 
     @pytest.mark.asyncio
-    async def test_happy_path(self, mock_cassandra_session):
+    async def test_happy_path(self):
         """Verify create_kafka_topic succeeds when Kafka admin client succeeds."""
-        del mock_cassandra_session
         mock_future = MagicMock()
         mock_future.result.return_value = None
         mock_admin = MagicMock()
@@ -202,9 +279,8 @@ class TestCreateCassandraTable:
         mock_admin.create_topics.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_failure_raises_http_500(self, mock_cassandra_session):
+    async def test_failure_raises_http_500(self):
         """Verify create_kafka_topic raises HTTP 500 when Kafka admin client fails."""
-        del mock_cassandra_session
         mock_future = MagicMock()
         mock_future.result.side_effect = Exception("Kafka error")
         mock_admin = MagicMock()
@@ -223,9 +299,8 @@ class TestDeleteKafkaTopic:
     """Tests for delete_kafka_topic."""
 
     @pytest.mark.asyncio
-    async def test_happy_path(self, mock_cassandra_session):
+    async def test_happy_path(self):
         """Verify delete_kafka_topic succeeds when Kafka admin client succeeds."""
-        del mock_cassandra_session
         mock_future = MagicMock()
         mock_future.result.return_value = None
         mock_admin = MagicMock()
@@ -237,9 +312,8 @@ class TestDeleteKafkaTopic:
         mock_admin.delete_topics.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_failure_raises_http_500(self, mock_cassandra_session):
+    async def test_failure_raises_http_500(self):
         """Verify delete_kafka_topic raises HTTP 500 when Kafka admin client fails."""
-        del mock_cassandra_session
         mock_future = MagicMock()
         mock_future.result.side_effect = Exception("Kafka error")
         mock_admin = MagicMock()
@@ -257,26 +331,28 @@ class TestDeleteKafkaTopic:
 class TestCheckCollectionExists:
     """Tests for check_collection_exists."""
 
-    def test_found(self, mock_cassandra_session):
+    def test_found(self):
         """Verify check_collection_exists returns the collection row when found."""
         coll_id = uuid.uuid4()
         proj_id = uuid.uuid4()
         row = MagicMock(id=coll_id)
-        mock_cassandra_session.execute.return_value = MagicMock(one=MagicMock(return_value=row))
 
-        with patch("utilities.collection_utils.get_organization_id", return_value=uuid.uuid4()):
+        with (
+            patch("utilities.collection_utils.get_organization_id", return_value=uuid.uuid4()),
+            patch("utilities.collection_utils.pg_fetchone", return_value=row),
+        ):
             result = check_collection_exists(coll_id, proj_id)
 
         assert result == row
 
-    def test_not_found_raises_404(self, mock_cassandra_session):
+    def test_not_found_raises_404(self):
         """Verify check_collection_exists raises HTTP 404 when collection is not found."""
         coll_id = uuid.uuid4()
         proj_id = uuid.uuid4()
-        mock_cassandra_session.execute.return_value = MagicMock(one=MagicMock(return_value=None))
 
         with (
             patch("utilities.collection_utils.get_organization_id", return_value=uuid.uuid4()),
+            patch("utilities.collection_utils.pg_fetchone", return_value=None),
             pytest.raises(HTTPException) as exc_info,
         ):
             check_collection_exists(coll_id, proj_id)
@@ -285,7 +361,7 @@ class TestCheckCollectionExists:
 
 
 class TestInsertDataIntoTable:
-    """Tests for insert_data_into_table."""
+    """Tests for insert_data_into_table — still uses Cassandra session."""
 
     @pytest.mark.asyncio
     async def test_happy_path_with_timestamp_string(self, mock_cassandra_session):

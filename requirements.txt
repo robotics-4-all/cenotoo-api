@@ -2,6 +2,7 @@ fastapi
 fastapi-cli
 uvicorn
 cassandra-driver==3.29.1
+psycopg2-binary
 confluent-kafka==2.4.0
 kafka-python==2.0.2
 pydantic==2.7.2

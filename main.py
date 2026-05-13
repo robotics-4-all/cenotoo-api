@@ -31,10 +31,14 @@ async def lifespan(application: FastAPI):
             raise RuntimeError("JWT_SECRET_KEY must be changed from default in production")
         if settings.api_key_secret == "default-api-key-secret":
             raise RuntimeError("API_KEY_SECRET must be changed from default in production")
+    from utilities.postgres_connector import get_postgres_pool, shutdown_postgres
+
+    get_postgres_pool()
     yield
     from utilities.cassandra_connector import shutdown_cassandra
 
     shutdown_cassandra()
+    shutdown_postgres()
     logger.info("Cenotoo API shutdown complete")
 
 

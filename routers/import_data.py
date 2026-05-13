@@ -130,7 +130,7 @@ async def import_data(
         final_is_valid, final_error = validate_message_against_simple_schema(message, schema)
 
         if final_is_valid:
-            message["id"] = str(uuid.uuid4())
+            message["id"] = uuid.uuid4()
             valid_messages.append(message)
         else:
             errors.append({"row": i, "error": final_error})
@@ -140,7 +140,9 @@ async def import_data(
         for i, message_data in enumerate(valid_messages):
             message_key = message_data["key"]
             kafka_value = {k: v for k, v in message_data.items() if k != "key"}
-            kafka_producer.produce(topic_name, key=message_key, value=json.dumps(kafka_value))
+            kafka_producer.produce(
+                topic_name, key=message_key, value=json.dumps(kafka_value, default=str)
+            )
             if (i + 1) % 1000 == 0:
                 kafka_producer.flush()
         kafka_producer.flush()
