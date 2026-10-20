@@ -8,14 +8,10 @@ import hashlib
 import logging
 import secrets
 import uuid
-from datetime import datetime
 
-from cassandra.cluster import Session
 from fastapi import HTTPException, status
 
-from utilities.cassandra_connector import get_cassandra_session
-
-session: Session = get_cassandra_session()
+from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
 
 
 def generate_key() -> str:
@@ -26,9 +22,6 @@ def generate_key() -> str:
 def hash_api_key(key: str) -> str:
     """Return the SHA-256 hash of an API key."""
     return hashlib.sha256(key.encode()).hexdigest()
-
-
-# Insert a new project key into the database
 
 
 def insert_project_key(project_id: uuid.UUID, key_type: str) -> str:
@@ -48,12 +41,9 @@ def insert_project_key(project_id: uuid.UUID, key_type: str) -> str:
         key_value = generate_key()
         key_id = uuid.uuid4()
 
-        insert_query = """
-        INSERT INTO metadata.api_keys (id, api_key, created_at, key_type, project_id)
-        VALUES (%s, %s, %s, %s, %s)
-        """
-        session.execute(
-            insert_query, (key_id, hash_api_key(key_value), datetime.utcnow(), key_type, project_id)
+        pg_execute(
+            "INSERT INTO api_keys (id, api_key, created_at, key_type, project_id) VALUES (%s, %s, NOW(), %s, %s)",
+            (key_id, hash_api_key(key_value), key_type, project_id),
         )
 
         return key_value
@@ -62,9 +52,6 @@ def insert_project_key(project_id: uuid.UUID, key_type: str) -> str:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create project key"
         ) from e
-
-
-# Fetch project keys by category or all keys
 
 
 def fetch_project_keys_by_category(project_id: uuid.UUID, key_category: str):
@@ -82,31 +69,27 @@ def fetch_project_keys_by_category(project_id: uuid.UUID, key_category: str):
     """
     try:
         if key_category == "all":
-            query = (
+            keys = pg_fetchall(
                 "SELECT id, api_key, key_type, created_at, project_id "
-                "FROM metadata.api_keys WHERE project_id=%s ALLOW FILTERING"
+                "FROM api_keys WHERE project_id=%s",
+                (project_id,),
             )
-            rows = session.execute(query, (project_id,))
         else:
-            query = (
+            keys = pg_fetchall(
                 "SELECT id, api_key, key_type, created_at, project_id "
-                "FROM metadata.api_keys WHERE project_id=%s AND key_type=%s ALLOW FILTERING"
+                "FROM api_keys WHERE project_id=%s AND key_type=%s",
+                (project_id, key_category),
             )
-            rows = session.execute(query, (project_id, key_category))
     except BaseException as e:
         logging.error("Error fetching project keys by category: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch project keys"
         ) from e
-    keys = rows.all()
     if not keys:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="No keys found for the specified category"
         )
     return keys
-
-
-# Update an existing project key (regenerate a new key)
 
 
 def update_project_key(key_id: uuid.UUID, current_key_value: str) -> str:
@@ -126,10 +109,10 @@ def update_project_key(key_id: uuid.UUID, current_key_value: str) -> str:
     try:
         new_key_value = generate_key()
 
-        update_query = """
-        UPDATE metadata.api_keys SET api_key=%s, created_at=%s WHERE id=%s
-        """
-        session.execute(update_query, (hash_api_key(new_key_value), datetime.utcnow(), key_id))
+        pg_execute(
+            "UPDATE api_keys SET api_key=%s, created_at=NOW() WHERE id=%s",
+            (hash_api_key(new_key_value), key_id),
+        )
 
         return new_key_value
     except Exception as e:
@@ -137,9 +120,6 @@ def update_project_key(key_id: uuid.UUID, current_key_value: str) -> str:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update project key"
         ) from e
-
-
-# Delete keys by category
 
 
 def delete_keys_by_category(project_id: uuid.UUID, key_category: str):
@@ -158,9 +138,6 @@ def delete_keys_by_category(project_id: uuid.UUID, key_category: str):
     return {"message": "Keys deleted successfully."}
 
 
-# Delete a specific key by value
-
-
 def delete_key_by_value(key_id: uuid.UUID):
     """Delete a specific project API key by its ID.
 
@@ -171,16 +148,12 @@ def delete_key_by_value(key_id: uuid.UUID):
         HTTPException: If deletion fails.
     """
     try:
-        delete_query = "DELETE FROM metadata.api_keys WHERE id=%s"
-        session.execute(delete_query, (key_id,))
+        pg_execute("DELETE FROM api_keys WHERE id=%s", (key_id,))
     except Exception as e:
         logging.error("Error deleting key by value: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete project key"
         ) from e
-
-
-# Get a project key by its value
 
 
 def get_project_key_by_value(key_value: str, project_id: uuid.UUID):
@@ -197,11 +170,11 @@ def get_project_key_by_value(key_value: str, project_id: uuid.UUID):
         HTTPException: If key not found or query fails.
     """
     try:
-        query = (
+        key = pg_fetchone(
             "SELECT id, api_key, key_type, project_id, created_at "
-            "FROM metadata.api_keys WHERE api_key=%s and project_id=%s LIMIT 1 ALLOW FILTERING"
+            "FROM api_keys WHERE api_key=%s AND project_id=%s LIMIT 1",
+            (hash_api_key(key_value), project_id),
         )
-        key = session.execute(query, (hash_api_key(key_value), project_id)).one()
     except Exception as e:
         logging.error("Error retrieving project key by value: %s", e)
         raise HTTPException(

@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 
 from dependencies import (
     check_project_exists,
@@ -14,11 +14,11 @@ from utilities.collection_utils import (
     check_collection_exists,
     fetch_collection_schema,
     get_collection_by_id,
-    insert_data_into_table,
 )
 from utilities.kafka_connector import get_kafka_producer
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
+from utilities.rule_utils import evaluate_and_fire_rules
 
 logger = logging.getLogger(__name__)
 flush_threshold = 1
@@ -128,6 +128,7 @@ def validate_message_against_simple_schema(
 async def send_data_to_collection(
     project_id: uuid.UUID,
     collection_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     data: dict | list[dict] = Body(...),
 ):
     """Validate and send data to a collection's Kafka topic."""
@@ -142,7 +143,7 @@ async def send_data_to_collection(
 
     # Get the collection's schema
     schema = await fetch_collection_schema(organization_name, project_name, collection_name)
-    print(f"Schema for collection '{collection_name}': {schema}")
+    logger.debug("Schema for collection '%s': %s", collection_name, schema)
 
     if not schema:
         raise HTTPException(
@@ -179,7 +180,7 @@ async def send_data_to_collection(
 
         if "timestamp" not in message:
             message["timestamp"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-            print(f"Added missing 'timestamp' field to message {i}")
+            logger.debug("Added missing 'timestamp' field to message %d", i)
         # Convert the 'timestamp' string to a datetime object and extract 'day'
         try:
             timestamp_dt = datetime.fromisoformat(message["timestamp"].replace("Z", "+00:00"))
@@ -198,6 +199,7 @@ async def send_data_to_collection(
         final_is_valid, final_error = validate_message_against_simple_schema(message, schema)
 
         if final_is_valid:
+            message["id"] = str(uuid.uuid4())
             valid_messages.append(message)
         else:
             invalid_messages.append(
@@ -234,7 +236,10 @@ async def send_data_to_collection(
             kafka_producer.flush()
 
     kafka_producer.flush()
-    await insert_data_into_table(organization_name, project_name, collection_name, valid_messages)
+
+    background_tasks.add_task(
+        evaluate_and_fire_rules, project_id, collection_id, organization_id, valid_messages
+    )
 
     return {
         "message": f"Data sent to collection '{collection_name}' successfully.",

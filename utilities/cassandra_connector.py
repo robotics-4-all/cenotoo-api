@@ -57,7 +57,7 @@ def get_cassandra_session():
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             cluster = Cluster(**cluster_kwargs)
-            session = cluster.connect("metadata")
+            session = cluster.connect()
             logger.info("Connected to Cassandra (attempt %d/%d)", attempt, _MAX_RETRIES)
             _state["cluster"] = cluster
             _state["session"] = session

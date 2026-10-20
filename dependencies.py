@@ -16,8 +16,8 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, OAuth2P
 
 from config import settings
 from services.auth_service import verify_jwt_token
-from utilities.cassandra_connector import get_cassandra_session
 from utilities.organization_utils import get_organization_by_id
+from utilities.postgres_connector import pg_fetchone
 from utilities.project_keys_utils import hash_api_key
 from utilities.project_utils import get_project_by_id
 from utilities.user_utils import get_user_by_username
@@ -67,13 +67,11 @@ def validate_api_key(api_key: str, project_id: uuid.UUID):
     """
     if not api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key is required")
-    query = (
-        "SELECT key_type, project_id FROM api_keys "
-        "WHERE api_key=%s AND project_id=%s LIMIT 1 allow filtering"
-    )
-    session = get_cassandra_session()
     try:
-        key_data = session.execute(query, (hash_api_key(api_key), project_id)).one()
+        key_data = pg_fetchone(
+            "SELECT key_type, project_id FROM api_keys WHERE api_key=%s AND project_id=%s",
+            (hash_api_key(api_key), project_id),
+        )
         if key_data:
             return key_data.key_type, key_data.project_id
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API key")
@@ -236,14 +234,14 @@ def verify_write_access(
 def verify_api_key_access(
     project_id: uuid.UUID,
     roles: list[str] | None = None,
-    api_key: HTTPAuthorizationCredentials | None = Depends(header_scheme),
+    api_key: str | None = Depends(header_scheme),
 ):
     """Verify API key access with specific role requirements.
 
     Args:
         project_id: The project UUID being accessed.
         roles: List of acceptable API key roles (defaults to all).
-        api_key: The API key from request header.
+        api_key: The API key from request header (raw string from X-API-Key header).
 
     Returns:
         True if API key is valid and has required permissions.
@@ -253,7 +251,7 @@ def verify_api_key_access(
     """
     if roles is None:
         roles = ["master", "read", "write"]
-    key_type, key_project_id = validate_api_key(api_key.credentials if api_key else "", project_id)
+    key_type, key_project_id = validate_api_key(api_key if api_key else "", project_id)
     return check_api_key(key_type, key_project_id, project_id, roles)
 
 

@@ -1,16 +1,14 @@
 """Project database utility functions.
 
 This module provides utility functions for CRUD operations on projects
-in the Cassandra database.
+in the PostgreSQL database.
 """
 
 import uuid
 from typing import Any
 
 from models.project_models import ProjectCreateRequest, ProjectUpdateRequest
-from utilities.cassandra_connector import get_cassandra_session
-
-session = get_cassandra_session()
+from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
 
 
 async def create_project_in_db(organization_id: uuid.UUID, project_data: ProjectCreateRequest):
@@ -27,9 +25,9 @@ async def create_project_in_db(organization_id: uuid.UUID, project_data: Project
     project_id = uuid.uuid4()
     query = """
     INSERT INTO project (id, organization_id, project_name, description, tags, creation_date)
-    VALUES (%s, %s, %s, %s, %s, toTimestamp(now()))
+    VALUES (%s, %s, %s, %s, %s, NOW())
     """
-    session.execute(
+    pg_execute(
         query,
         (
             project_id,
@@ -68,7 +66,7 @@ async def update_project_in_db(project_id: uuid.UUID, project_data: ProjectUpdat
     update_query = update_query.rstrip(", ") + " WHERE id=%s"
     update_params.extend([project_id])
 
-    session.execute(update_query, tuple(update_params))
+    pg_execute(update_query, tuple(update_params))
     return True
 
 
@@ -82,8 +80,7 @@ async def delete_project_in_db(project_id: uuid.UUID):
         True if successful.
     """
 
-    query = "DELETE FROM project WHERE id=%s"
-    session.execute(query, (project_id,))
+    pg_execute("DELETE FROM project WHERE id=%s", (project_id,))
     return True
 
 
@@ -97,11 +94,11 @@ async def get_all_organization_projects_from_db(organization_id: uuid.UUID):
         List of project records.
     """
 
-    query = (
+    return pg_fetchall(
         "SELECT id, project_name, description, tags, creation_date, organization_id "
-        "FROM project WHERE organization_id=%s ALLOW FILTERING"
+        "FROM project WHERE organization_id=%s",
+        (organization_id,),
     )
-    return session.execute(query, (organization_id,)).all()
 
 
 def get_project_by_id(project_id: uuid.UUID, organization_id: uuid.UUID):
@@ -115,12 +112,11 @@ def get_project_by_id(project_id: uuid.UUID, organization_id: uuid.UUID):
         Project record from database.
     """
 
-    query = (
+    return pg_fetchone(
         "SELECT id, project_name, description, tags, creation_date, "
-        "organization_id FROM project WHERE id=%s AND organization_id=%s "
-        "LIMIT 1 ALLOW FILTERING"
+        "organization_id FROM project WHERE id=%s AND organization_id=%s",
+        (project_id, organization_id),
     )
-    return session.execute(query, (project_id, organization_id)).one()
 
 
 async def get_project_by_name(organization_id: uuid.UUID, project_name: str):
@@ -133,10 +129,7 @@ async def get_project_by_name(organization_id: uuid.UUID, project_name: str):
     Returns:
         Project record if found, None otherwise.
     """
-    query = "SELECT id FROM project WHERE organization_id=%s AND project_name=%s ALLOW FILTERING"
-    result = session.execute(query, (organization_id, project_name))
-    # Check if there are any rows
-    rows = list(result)
-    if rows:
-        return rows[0]  # Return the first row
-    return None  # Return None if no rows found
+    return pg_fetchone(
+        "SELECT id FROM project WHERE organization_id=%s AND project_name=%s",
+        (organization_id, project_name),
+    )

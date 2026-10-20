@@ -3,7 +3,11 @@
 import pytest
 
 from core.exceptions import ValidationError
-from core.filters import escape_cql_string, generate_filter_condition
+from core.filters import (
+    escape_cql_string,
+    generate_filter_condition,
+    generate_filter_condition_parameterized,
+)
 
 
 class TestEscapeCqlString:
@@ -141,3 +145,44 @@ class TestGenerateFilterCondition:
         """Verify that an empty column name raises a ValidationError."""
         with pytest.raises(ValidationError):
             generate_filter_condition("", "eq", "val")
+
+
+class TestGenerateFilterConditionParameterized:
+    def test_parameterized_eq_string(self):
+        frag, params = generate_filter_condition_parameterized("name", "eq", "Alice")
+        assert frag == '"name" = %s'
+        assert params == ["Alice"]
+
+    def test_parameterized_eq_integer(self):
+        frag, params = generate_filter_condition_parameterized("age", "eq", 42)
+        assert frag == '"age" = %s'
+        assert params == [42]
+
+    def test_parameterized_gt_float(self):
+        frag, params = generate_filter_condition_parameterized("temp", "gt", 22.5)
+        assert frag == '"temp" > %s'
+        assert params == [22.5]
+
+    def test_parameterized_in_integers(self):
+        frag, params = generate_filter_condition_parameterized("id", "in", [1, 2, 3])
+        assert frag == '"id" IN (%s, %s, %s)'
+        assert params == [1, 2, 3]
+
+    def test_parameterized_in_strings(self):
+        frag, params = generate_filter_condition_parameterized("status", "in", ["a", "b"])
+        assert frag == '"status" IN (%s, %s)'
+        assert params == ["a", "b"]
+
+    def test_parameterized_contains(self):
+        frag, params = generate_filter_condition_parameterized("tags", "contains", "iot")
+        assert frag == '"tags" CONTAINS %s'
+        assert params == ["iot"]
+
+    def test_parameterized_unknown_operator(self):
+        frag, params = generate_filter_condition_parameterized("x", "LIKE", "foo")
+        assert frag == ""
+        assert params == []
+
+    def test_parameterized_invalid_column_raises(self):
+        with pytest.raises(ValidationError):
+            generate_filter_condition_parameterized('"injected"', "eq", "val")

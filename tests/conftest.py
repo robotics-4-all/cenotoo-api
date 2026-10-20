@@ -87,6 +87,50 @@ def _patch_cassandra(mock_cassandra_session):
 
 
 # ---------------------------------------------------------------------------
+# PostgreSQL mock
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def mock_pg_conn():
+    """Return the mock PostgreSQL connection used by postgres_connector helpers."""
+    from conftest import _mock_pg_conn
+
+    _mock_pg_conn.reset_mock()
+    return _mock_pg_conn
+
+
+@pytest.fixture(autouse=True)
+def _patch_postgres(mock_pg_conn):
+    """Patch postgres_connector helpers so no test hits a real PostgreSQL."""
+    from conftest import _mock_pg_pool
+
+    _mock_pg_pool.getconn.return_value = mock_pg_conn
+
+    mock_cursor = MagicMock()
+    mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+    mock_cursor.__exit__ = MagicMock(return_value=False)
+    mock_cursor.fetchone.return_value = None
+    mock_cursor.fetchall.return_value = []
+    mock_pg_conn.cursor.return_value = mock_cursor
+
+    with (
+        patch(
+            "utilities.postgres_connector.get_postgres_pool",
+            return_value=_mock_pg_pool,
+        ),
+        patch("utilities.postgres_connector.pg_execute", return_value=[]),
+        patch("utilities.postgres_connector.pg_fetchone", return_value=None),
+        patch("utilities.postgres_connector.pg_fetchall", return_value=[]),
+    ):
+        yield {
+            "pool": _mock_pg_pool,
+            "conn": mock_pg_conn,
+            "cursor": mock_cursor,
+        }
+
+
+# ---------------------------------------------------------------------------
 # Kafka mock
 # ---------------------------------------------------------------------------
 

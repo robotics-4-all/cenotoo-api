@@ -29,12 +29,17 @@ class Settings(BaseSettings):
     cassandra_username: str = ""
     cassandra_password: str = ""
 
+    postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
+    postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
+    postgres_db: str = Field(default="cenotoo", alias="POSTGRES_DB")
+    postgres_user: str = Field(default="cenotoo", alias="POSTGRES_USER")
+    postgres_password: str = Field(default="cenotoo", alias="POSTGRES_PASSWORD")
+
     api_key_secret: str = "default-api-key-secret"
     organization_id: str = Field(
         default="default-organization-id",
         validation_alias=AliasChoices("ORGANIZATION_ID", "organization_id"),
     )
-
     flink_sql_gateway_url: str = "http://localhost:8083"
 
     cors_origins: str = "*"
@@ -44,6 +49,8 @@ class Settings(BaseSettings):
 
     otlp_endpoint: str = ""
     otlp_service_name: str = "cenotoo-api"
+
+    max_stats_rows: int = 500_000
 
     model_config = SettingsConfigDict(
         env_file=".env",

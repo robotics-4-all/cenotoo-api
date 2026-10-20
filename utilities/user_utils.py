@@ -1,16 +1,12 @@
 """User database utility functions.
 
 This module provides utility functions for CRUD operations on users
-in the Cassandra database.
+in the PostgreSQL database.
 """
 
 import uuid
 
-from cassandra.cluster import Session
-
-from utilities.cassandra_connector import get_cassandra_session
-
-session: Session = get_cassandra_session()
+from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
 
 
 def get_user_by_username(username: str):
@@ -22,9 +18,7 @@ def get_user_by_username(username: str):
     Returns:
         User record if found, None otherwise.
     """
-    query = "SELECT * FROM user WHERE username = %s LIMIT 1 ALLOW FILTERING"
-    result = session.execute(query, (username,))
-    user = result.one()
+    user = pg_fetchone("SELECT * FROM users WHERE username = %s", (username,))
     if user:
         return user
     return None
@@ -40,9 +34,10 @@ async def get_user_by_username_and_org_id(username: str, organization_id: uuid.U
     Returns:
         User record from database.
     """
-    query = "SELECT id FROM user WHERE username=%s AND organization_id=%s LIMIT 1 ALLOW FILTERING"
-    result = session.execute(query, (username, organization_id)).one()
-    return result
+    return pg_fetchone(
+        "SELECT id FROM users WHERE username=%s AND organization_id=%s",
+        (username, organization_id),
+    )
 
 
 async def insert_user(
@@ -61,11 +56,10 @@ async def insert_user(
         hashed_password: The hashed password.
         role: The user's role within the organization.
     """
-    query = """
-        INSERT INTO user (id, organization_id, username, password, role)
-        VALUES (%s, %s, %s, %s, %s)
-    """
-    session.execute(query, (user_id, organization_id, username, hashed_password, role))
+    pg_execute(
+        "INSERT INTO users (id, organization_id, username, password, role) VALUES (%s, %s, %s, %s, %s)",
+        (user_id, organization_id, username, hashed_password, role),
+    )
 
 
 async def delete_user_from_db(user_id: uuid.UUID):
@@ -74,8 +68,7 @@ async def delete_user_from_db(user_id: uuid.UUID):
     Args:
         user_id: UUID of the user to delete.
     """
-    query = "DELETE FROM user WHERE id=%s"
-    session.execute(query, (user_id,))
+    pg_execute("DELETE FROM users WHERE id=%s", (user_id,))
 
 
 async def update_user_password_in_db(user_id: uuid.UUID, hashed_password: str):
@@ -85,8 +78,7 @@ async def update_user_password_in_db(user_id: uuid.UUID, hashed_password: str):
         user_id: UUID of the user.
         hashed_password: The new hashed password.
     """
-    query = "UPDATE user SET password=%s WHERE id=%s"
-    session.execute(query, (hashed_password, user_id))
+    pg_execute("UPDATE users SET password=%s WHERE id=%s", (hashed_password, user_id))
 
 
 async def get_all_users_in_organization(organization_id: uuid.UUID):
@@ -98,8 +90,9 @@ async def get_all_users_in_organization(organization_id: uuid.UUID):
     Returns:
         List of user dictionaries with username and role.
     """
-    query = "SELECT id, username, role FROM user WHERE organization_id=%s ALLOW FILTERING"
-    users = session.execute(query, (organization_id,)).all()
+    users = pg_fetchall(
+        "SELECT id, username, role FROM users WHERE organization_id=%s", (organization_id,)
+    )
     return [{"username": user.username, "role": user.role or "member"} for user in users]
 
 
@@ -110,5 +103,4 @@ async def update_user_role_in_db(user_id: uuid.UUID, role: str):
         user_id: UUID of the user.
         role: The new role to assign.
     """
-    query = "UPDATE user SET role=%s WHERE id=%s"
-    session.execute(query, (role, user_id))
+    pg_execute("UPDATE users SET role=%s WHERE id=%s", (role, user_id))

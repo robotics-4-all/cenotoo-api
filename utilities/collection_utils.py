@@ -11,10 +11,12 @@ from dependencies import get_organization_id
 from models.collection_models import CollectionCreateRequest, CollectionUpdateRequest
 from utilities.cassandra_connector import get_cassandra_session
 from utilities.kafka_connector import get_kafka_admin_client
+from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
 from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
 from utilities.schema_utils import (
     CASSANDRA_TO_USER_TYPES,
+    STRING_TO_CASSANDRA_TYPES,
     flatten_object,
     is_list_of_same_schema,
     unflatten_schema,
@@ -32,12 +34,11 @@ def get_collection_by_id(
     collection_id: uuid.UUID, project_id: uuid.UUID, organization_id: uuid.UUID
 ):
     """Return a collection by its ID."""
-    query = (
+    return pg_fetchone(
         "SELECT id, collection_name, description, tags, creation_date, project_id, organization_id "
-        "FROM collection WHERE id=%s AND project_id=%s AND organization_id=%s "
-        "LIMIT 1 ALLOW FILTERING"
+        "FROM collection WHERE id=%s AND project_id=%s AND organization_id=%s",
+        (collection_id, project_id, organization_id),
     )
-    return session.execute(query, (collection_id, project_id, organization_id)).one()
 
 
 # Insert a new collection into the database
@@ -47,14 +48,14 @@ async def insert_collection(
     organization_id: uuid.UUID, project_id: uuid.UUID, data: CollectionCreateRequest
 ):
     """Insert a new collection into the database."""
-    query = """
-    INSERT INTO collection (id, collection_name, creation_date, description,
-    organization_id, project_id, tags)
-    VALUES (%s, %s, toTimestamp(now()), %s, %s, %s, %s)
-    """
     collection_id = uuid.uuid4()
-    session.execute(
-        query, (collection_id, data.name, data.description, organization_id, project_id, data.tags)
+    pg_execute(
+        """
+        INSERT INTO collection (id, collection_name, creation_date, description,
+        organization_id, project_id, tags)
+        VALUES (%s, %s, NOW(), %s, %s, %s, %s)
+        """,
+        (collection_id, data.name, data.description, organization_id, project_id, data.tags),
     )
     return collection_id
 
@@ -78,7 +79,7 @@ async def update_collection_in_db(collection_id: uuid.UUID, data: CollectionUpda
     update_query = update_query.rstrip(", ") + " WHERE id=%s"
     update_params.append(collection_id)
 
-    session.execute(update_query, tuple(update_params))
+    pg_execute(update_query, tuple(update_params))
 
 
 # Delete a collection from the database
@@ -86,25 +87,23 @@ async def update_collection_in_db(collection_id: uuid.UUID, data: CollectionUpda
 
 async def delete_collection_from_db(collection_id: uuid.UUID):
     """Delete a collection from the database."""
-    query = "DELETE FROM collection WHERE id=%s"
-    session.execute(query, (collection_id,))
+    pg_execute("DELETE FROM collection WHERE id=%s", (collection_id,))
 
 
-# Fetch a collection by its ID
+# Fetch a collection by its name
 
 
 async def fetch_collection_by_name(
     organization_id: uuid.UUID, project_id: uuid.UUID, collection_name: str
 ):
     """Fetch a collection by its name."""
-    query = (
-        "SELECT * FROM collection WHERE collection_name=%s AND project_id=%s "
-        "AND organization_id=%s ALLOW FILTERING"
+    return pg_fetchone(
+        "SELECT * FROM collection WHERE collection_name=%s AND project_id=%s AND organization_id=%s",
+        (collection_name, project_id, organization_id),
     )
-    return session.execute(query, (collection_name, project_id, organization_id)).one()
 
 
-SYSTEM_FIELDS = {"key", "timestamp", "day"}
+SYSTEM_FIELDS = {"key", "timestamp", "day", "id"}
 
 
 async def fetch_collection_schema(organization_name: str, project_name: str, collection_name: str):
@@ -140,9 +139,10 @@ async def fetch_collection_schema(organization_name: str, project_name: str, col
 
 def fetch_all_collections(organization_id: uuid.UUID, project_id: uuid.UUID):
     """Fetch all collections for a project."""
-    query = "SELECT * FROM collection WHERE organization_id=%s AND project_id=%s ALLOW FILTERING"
-    rows = session.execute(query, (organization_id, project_id))
-    return rows.all()
+    return pg_fetchall(
+        "SELECT * FROM collection WHERE organization_id=%s AND project_id=%s",
+        (organization_id, project_id),
+    )
 
 
 # Create a Cassandra table for the collection
@@ -164,6 +164,7 @@ async def create_cassandra_table(
     flattened_schema = flatten_object(data.collection_schema)
     flattened_schema["timestamp"] = "TIMESTAMP"
     flattened_schema["day"] = "DATE"
+    flattened_schema["id"] = "UUID"
     # Check for key column, if not present add it
     has_key = any(key.lower() == "key" for key in flattened_schema)
     if not has_key:
@@ -171,7 +172,7 @@ async def create_cassandra_table(
     columns = ", ".join(
         [f'"{col_name}" {col_type}' for col_name, col_type in flattened_schema.items()]
     )
-    primary_key = "((day, key), timestamp)"
+    primary_key = "((day, key), timestamp, id)"
     create_table_query = f"""
     CREATE TABLE IF NOT EXISTS {keyspace_name}.{table_name} (
         {columns},
@@ -256,6 +257,75 @@ def check_collection_exists(collection_id: uuid.UUID, project_id: uuid.UUID):
     if not collection:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Collection not found.")
     return collection
+
+
+async def alter_cassandra_table_add_columns(
+    organization_name: str, project_name: str, collection_name: str, fields: dict[str, str]
+) -> list[str]:
+    validate_cql_identifier(organization_name, "keyspace")
+    validate_cql_identifier(project_name, "project")
+    validate_cql_identifier(collection_name, "collection")
+
+    keyspace_name = organization_name
+    table_name = f"{project_name}_{collection_name}"
+
+    existing_query = (
+        "SELECT column_name FROM system_schema.columns WHERE keyspace_name=%s AND table_name=%s"
+    )
+    existing_rows = session.execute(existing_query, (keyspace_name, table_name))
+    existing_cols = {row.column_name for row in existing_rows}
+
+    added: list[str] = []
+    for col, user_type in fields.items():
+        if col in SYSTEM_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Cannot add system field '{col}'.")
+        cql_type = STRING_TO_CASSANDRA_TYPES.get(user_type.lower())
+        if cql_type is None:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported type '{user_type}' for field '{col}'."
+            )
+        if col in existing_cols:
+            raise HTTPException(status_code=409, detail=f"Field '{col}' already exists.")
+        try:
+            session.execute(f'ALTER TABLE {keyspace_name}."{table_name}" ADD "{col}" {cql_type}')
+            added.append(col)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to add column '{col}': {str(e)}"
+            ) from e
+    return added
+
+
+async def alter_cassandra_table_drop_columns(
+    organization_name: str, project_name: str, collection_name: str, fields: list[str]
+) -> list[str]:
+    validate_cql_identifier(organization_name, "keyspace")
+    validate_cql_identifier(project_name, "project")
+    validate_cql_identifier(collection_name, "collection")
+
+    keyspace_name = organization_name
+    table_name = f"{project_name}_{collection_name}"
+
+    existing_query = (
+        "SELECT column_name FROM system_schema.columns WHERE keyspace_name=%s AND table_name=%s"
+    )
+    existing_rows = session.execute(existing_query, (keyspace_name, table_name))
+    existing_cols = {row.column_name for row in existing_rows}
+
+    removed: list[str] = []
+    for col in fields:
+        if col in SYSTEM_FIELDS:
+            raise HTTPException(status_code=400, detail=f"Cannot remove system field '{col}'.")
+        if col not in existing_cols:
+            raise HTTPException(status_code=404, detail=f"Field '{col}' does not exist.")
+        try:
+            session.execute(f'ALTER TABLE {keyspace_name}."{table_name}" DROP "{col}"')
+            removed.append(col)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Failed to drop column '{col}': {str(e)}"
+            ) from e
+    return removed
 
 
 async def insert_data_into_table(
