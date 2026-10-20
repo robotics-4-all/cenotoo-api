@@ -81,6 +81,7 @@ def _patch_cassandra(mock_cassandra_session):
         patch(
             "dependencies.get_cassandra_session",
             return_value=mock_cassandra_session,
+            create=True,  # dependencies no longer uses Cassandra since metadata moved to Postgres
         ),
     ):
         yield mock_cassandra_session

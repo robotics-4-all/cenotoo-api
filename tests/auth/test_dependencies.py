@@ -1,6 +1,6 @@
 import uuid
 from collections import namedtuple
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -65,22 +65,20 @@ class TestValidateApiKey:
 
     def test_valid_key_returns_tuple(self, mock_cassandra_session):
         """Verify that validating a valid API key returns a tuple of key type and project ID."""
+        del mock_cassandra_session  # keys live in Postgres since the metadata migration
         pid = uuid.uuid4()
         KeyRow = namedtuple("KeyRow", ["key_type", "project_id"])
-        mock_result = MagicMock()
-        mock_result.one.return_value = KeyRow(key_type="master", project_id=pid)
-        mock_cassandra_session.execute.return_value = mock_result
-        with patch("dependencies.get_cassandra_session", return_value=mock_cassandra_session):
+        with patch(
+            "dependencies.pg_fetchone", return_value=KeyRow(key_type="master", project_id=pid)
+        ):
             result = validate_api_key("valid-key-hex", pid)
         assert result == ("master", pid)
 
     def test_key_not_found_raises(self, mock_cassandra_session):
         """Verify that validating a non-existent API key raises an HTTPException."""
-        mock_result = MagicMock()
-        mock_result.one.return_value = None
-        mock_cassandra_session.execute.return_value = mock_result
+        del mock_cassandra_session  # keys live in Postgres since the metadata migration
         with (
-            patch("dependencies.get_cassandra_session", return_value=mock_cassandra_session),
+            patch("dependencies.pg_fetchone", return_value=None),
             pytest.raises(HTTPException) as exc_info,
         ):
             validate_api_key("nonexistent", uuid.uuid4())
@@ -88,9 +86,9 @@ class TestValidateApiKey:
 
     def test_db_exception_raises_403(self, mock_cassandra_session):
         """Verify that a database exception during API key validation raises a 403 HTTPException."""
-        mock_cassandra_session.execute.side_effect = Exception("connection lost")
+        del mock_cassandra_session  # keys live in Postgres since the metadata migration
         with (
-            patch("dependencies.get_cassandra_session", return_value=mock_cassandra_session),
+            patch("dependencies.pg_fetchone", side_effect=Exception("connection lost")),
             pytest.raises(HTTPException) as exc_info,
         ):
             validate_api_key("some-key", uuid.uuid4())

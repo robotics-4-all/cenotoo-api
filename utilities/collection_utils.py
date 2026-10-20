@@ -11,8 +11,8 @@ from dependencies import get_organization_id
 from models.collection_models import CollectionCreateRequest, CollectionUpdateRequest
 from utilities.cassandra_connector import get_cassandra_session
 from utilities.kafka_connector import get_kafka_admin_client
+from utilities.organization_utils import create_keyspace_in_db, get_organization_by_id
 from utilities.postgres_connector import pg_execute, pg_fetchall, pg_fetchone
-from utilities.organization_utils import get_organization_by_id
 from utilities.project_utils import get_project_by_id
 from utilities.schema_utils import (
     CASSANDRA_TO_USER_TYPES,
@@ -152,6 +152,10 @@ async def create_cassandra_table(
     organization_name: str, project_name: str, data: CollectionCreateRequest
 ):
     """Create a Cassandra table for the collection."""
+    # Ensure the org keyspace exists: orgs seeded directly in Postgres (bootstrap
+    # org, reset-admin) never went through org-create, so CREATE TABLE would 500
+    # with InvalidRequest. IF NOT EXISTS makes this a safe no-op otherwise.
+    await create_keyspace_in_db(organization_name)
     keyspace_name = organization_name
     table_name = f'"{project_name}_{data.name}"'
     # If the schema contains lists, ensure they are consistent
