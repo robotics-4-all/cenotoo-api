@@ -5,6 +5,7 @@ keys (stations) within collections.
 """
 
 import uuid
+from collections import Counter
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -60,22 +61,21 @@ async def get_key_statistics(
         if stats.record_count == 0:
             raise HTTPException(status_code=404, detail=f"No data found for key '{key}'")
 
-        # Get daily record counts
+        # Daily record counts. NOTE: no CQL GROUP BY here — the table's
+        # partition key is composite (day, key), and Cassandra only allows
+        # GROUP BY over the whole partition key, so grouping by day alone
+        # is rejected. Fetch days and aggregate in Python instead.
         daily_query = f"""
-            SELECT "day", COUNT(*) as daily_count
+            SELECT "day"
             FROM {keyspace_name}.{table_name}
             WHERE "key" = %s
-            GROUP BY "day"
             ALLOW FILTERING
         """
 
         daily_results = session.execute(daily_query, [key])
+        day_counts = Counter(row.day.strftime("%Y-%m-%d") for row in daily_results if row.day)
         daily_counts = [
-            {
-                "date": row.day.strftime("%Y-%m-%d"),
-                "record_count": row.daily_count,
-            }
-            for row in daily_results
+            {"date": day, "record_count": count} for day, count in sorted(day_counts.items())
         ]
 
         return {
