@@ -35,12 +35,17 @@ class TestBuildSinkTopic:
 
 
 class TestGenerateGuidedJobStatements:
-    def test_returns_four_statements(self):
+    def test_returns_five_statements(self):
         job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
         stmts = generate_guided_job_statements(
             "org", "proj", "coll", job, "org.proj.coll.stats.5minute.avg.temp"
         )
-        assert len(stmts) == 4
+        assert len(stmts) == 5
+
+    def test_second_statement_sets_source_idle_timeout(self):
+        job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
+        stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
+        assert stmts[1] == "SET 'table.exec.source.idle-timeout' = '30 s'"
 
     def test_first_statement_is_add_jar(self):
         job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
@@ -51,21 +56,21 @@ class TestGenerateGuidedJobStatements:
     def test_source_ddl_contains_kafka_topic(self):
         job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
         stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
-        assert "org.proj.coll" in stmts[1]
-        assert "KafkaSource" in stmts[1]
+        assert "org.proj.coll" in stmts[2]
+        assert "KafkaSource" in stmts[2]
 
     def test_sink_ddl_contains_sink_topic(self):
         job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
         stmts = generate_guided_job_statements("org", "proj", "coll", job, "my-sink-topic")
-        assert "my-sink-topic" in stmts[2]
-        assert "KafkaSink" in stmts[2]
+        assert "my-sink-topic" in stmts[3]
+        assert "KafkaSink" in stmts[3]
 
     def test_insert_dml_tumbling(self):
         job = GuidedJobRequest(attribute="temp", metric="avg", window_size=5, unit="minute")
         stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
-        assert "TUMBLE" in stmts[3]
-        assert "INSERT INTO KafkaSink" in stmts[3]
-        assert "avg_temp" in stmts[3]
+        assert "TUMBLE" in stmts[4]
+        assert "INSERT INTO KafkaSink" in stmts[4]
+        assert "avg_temp" in stmts[4]
 
     def test_insert_dml_sliding(self):
         job = GuidedJobRequest(
@@ -77,18 +82,18 @@ class TestGenerateGuidedJobStatements:
             sliding_step=2,
         )
         stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
-        assert "HOP" in stmts[3]
-        assert "min_temp" in stmts[3]
+        assert "HOP" in stmts[4]
+        assert "min_temp" in stmts[4]
 
     def test_count_metric_uses_count_star(self):
         job = GuidedJobRequest(attribute="temp", metric="count", window_size=1, unit="hour")
         stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
-        assert "COUNT(*)" in stmts[3]
+        assert "COUNT(*)" in stmts[4]
 
     def test_stddev_metric(self):
         job = GuidedJobRequest(attribute="temp", metric="stddev", window_size=1, unit="hour")
         stmts = generate_guided_job_statements("org", "proj", "coll", job, "sink-topic")
-        assert "STDDEV_POP" in stmts[3]
+        assert "STDDEV_POP" in stmts[4]
 
 
 class TestGatewayCreateSession:

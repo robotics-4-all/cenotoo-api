@@ -233,6 +233,7 @@ def generate_custom_job_statements(
 ) -> list[str]:
     return [
         f"ADD JAR '{_KAFKA_CONNECTOR_JAR}'",
+        _IDLE_TIMEOUT_STMT,
         _source_ddl_full(source_topic, fields),
         _sink_ddl_custom(sink_topic),
         f"INSERT INTO KafkaSink\n{user_sql}",
@@ -240,6 +241,14 @@ def generate_custom_job_statements(
 
 
 _KAFKA_CONNECTOR_JAR = "file:///opt/flink/lib/flink-sql-connector-kafka-3.0.2-1.18.jar"
+
+# Finite input bursts (e.g. a test sending 3 records, or a sensor going quiet)
+# leave the Kafka source idle afterwards. Without this, the source watermark
+# freezes at the last record and event-time windows never close, so guided
+# jobs emit nothing. Marking the source idle lets watermarks advance and
+# pending windows fire. Must be submitted before the source DDL takes effect
+# for subsequently started jobs in the session.
+_IDLE_TIMEOUT_STMT = "SET 'table.exec.source.idle-timeout' = '30 s'"
 
 
 def generate_guided_job_statements(
@@ -252,6 +261,7 @@ def generate_guided_job_statements(
     source_topic = f"{org}.{project}.{collection}"
     return [
         f"ADD JAR '{_KAFKA_CONNECTOR_JAR}'",
+        _IDLE_TIMEOUT_STMT,
         _source_ddl(source_topic, job.attribute),
         _sink_ddl(sink_topic, job.attribute, job.metric),
         _insert_dml(
