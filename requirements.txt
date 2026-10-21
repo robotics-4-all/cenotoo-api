@@ -18,4 +18,4 @@ passlib[bcrypt]
 pydantic-settings==2.7.1
 python-multipart>=0.0.22
 slowapi>=0.1.9
-pyarrow
+pyarrow==14.0.2  # pinned: last version compatible with pandas==2.0.3 + numpy<2 (unpinned resolved to v26, unimportable)

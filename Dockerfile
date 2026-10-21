@@ -18,6 +18,8 @@ RUN groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --no-create-home appuser
 
 COPY --from=builder /install /usr/local
+# Fail the build (not the export test) if the parquet engine is unimportable
+RUN python -c "import pyarrow.parquet, pandas; print('parquet engine ok:', pyarrow.__version__)"
 
 COPY main.py config.py dependencies.py ./
 COPY api/ api/
