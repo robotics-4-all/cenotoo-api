@@ -152,7 +152,7 @@ async def create_cross_collection_job_service(
     )
     session.execute(
         """
-        INSERT INTO flink_jobs
+        INSERT INTO metadata.flink_jobs
             (id, collection_id, project_id, session_handle, operation_handle,
              job_type, config, sink_topic, status, created_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, toTimestamp(now()))
@@ -170,7 +170,7 @@ async def create_cross_collection_job_service(
         ),
     )
 
-    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s", (job_id,)).one()
+    row = session.execute("SELECT * FROM metadata.flink_jobs WHERE id=%s", (job_id,)).one()
     return _row_to_response(row)
 
 
@@ -178,7 +178,7 @@ async def list_cross_collection_jobs_service(
     project_id: uuid.UUID,
 ) -> list[CrossCollectionJobResponse]:
     rows = session.execute(
-        "SELECT * FROM flink_jobs WHERE project_id=%s AND job_type=%s ALLOW FILTERING",
+        "SELECT * FROM metadata.flink_jobs WHERE project_id=%s AND job_type=%s ALLOW FILTERING",
         (project_id, "cross"),
     )
     return [_row_to_response(r) for r in rows]
@@ -188,7 +188,9 @@ async def get_cross_collection_job_service(
     project_id: uuid.UUID,
     job_id: uuid.UUID,
 ) -> CrossCollectionJobResponse:
-    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    row = session.execute(
+        "SELECT * FROM metadata.flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+    ).one()
     if not row or row.project_id != project_id or row.job_type != "cross":
         raise HTTPException(status_code=404, detail="Cross-collection job not found")
 
@@ -201,11 +203,11 @@ async def get_cross_collection_job_service(
             if gw_status in ("ERROR", "CANCELED"):
                 new_status = "ERROR" if gw_status == "ERROR" else "CANCELLED"
                 session.execute(
-                    "UPDATE flink_jobs SET status=%s WHERE id=%s",
+                    "UPDATE metadata.flink_jobs SET status=%s WHERE id=%s",
                     (new_status, job_id),
                 )
                 row = session.execute(
-                    "SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+                    "SELECT * FROM metadata.flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
                 ).one()
         except Exception:
             logger.warning("Could not refresh status for cross job %s", job_id)
@@ -217,14 +219,16 @@ async def stop_cross_collection_job_service(
     project_id: uuid.UUID,
     job_id: uuid.UUID,
 ) -> dict:
-    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    row = session.execute(
+        "SELECT * FROM metadata.flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+    ).one()
     if not row or row.project_id != project_id or row.job_type != "cross":
         raise HTTPException(status_code=404, detail="Cross-collection job not found")
     if row.status not in ("RUNNING", "PENDING"):
         raise HTTPException(status_code=400, detail="Job is not running")
 
     await gateway_cancel_session(row.session_handle)
-    session.execute("UPDATE flink_jobs SET status=%s WHERE id=%s", ("CANCELLED", job_id))
+    session.execute("UPDATE metadata.flink_jobs SET status=%s WHERE id=%s", ("CANCELLED", job_id))
     return {"message": f"Job {job_id} stopped"}
 
 
@@ -232,14 +236,16 @@ async def delete_cross_collection_job_service(
     project_id: uuid.UUID,
     job_id: uuid.UUID,
 ) -> dict:
-    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    row = session.execute(
+        "SELECT * FROM metadata.flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+    ).one()
     if not row or row.project_id != project_id or row.job_type != "cross":
         raise HTTPException(status_code=404, detail="Cross-collection job not found")
 
     if row.status in ("RUNNING", "PENDING"):
         await gateway_cancel_session(row.session_handle)
 
-    session.execute("DELETE FROM flink_jobs WHERE id=%s", (job_id,))
+    session.execute("DELETE FROM metadata.flink_jobs WHERE id=%s", (job_id,))
     return {"message": f"Job {job_id} deleted"}
 
 
@@ -248,7 +254,9 @@ async def restart_cross_collection_job_service(
     project_id: uuid.UUID,
     job_id: uuid.UUID,
 ) -> CrossCollectionJobResponse:
-    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    row = session.execute(
+        "SELECT * FROM metadata.flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+    ).one()
     if not row or row.project_id != project_id or row.job_type != "cross":
         raise HTTPException(status_code=404, detail="Cross-collection job not found")
 
@@ -271,7 +279,9 @@ async def get_cross_collection_job_results_service(
 ) -> FlinkJobResultsResponse:
     from utilities.kafka_consumer import read_topic_messages
 
-    row = session.execute("SELECT * FROM flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)).one()
+    row = session.execute(
+        "SELECT * FROM metadata.flink_jobs WHERE id=%s ALLOW FILTERING", (job_id,)
+    ).one()
     if not row or row.project_id != project_id or row.job_type != "cross":
         raise HTTPException(status_code=404, detail="Cross-collection job not found")
 
