@@ -61,7 +61,8 @@ def _source_ddl(topic: str, attribute: str) -> str:
         f"  `key` STRING,\n"
         f"  `{attribute}` DOUBLE,\n"
         f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
-        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND,\n"
+        f"  `proc_time` AS PROCTIME()\n"
         f") WITH (\n"
         f"  'connector' = 'kafka',\n"
         f"  'topic' = '{topic}',\n"
@@ -102,14 +103,14 @@ def _insert_dml(
     value_expr = "COUNT(*)" if metric == "count" else f"{_METRIC_SQL[metric]}(`{attribute}`)"
 
     if window_type == "tumbling":
-        window_expr = f"TUMBLE(`event_time`, INTERVAL '{window_size}' {flink_unit})"
-        start_expr = f"TUMBLE_START(`event_time`, INTERVAL '{window_size}' {flink_unit})"
-        end_expr = f"TUMBLE_END(`event_time`, INTERVAL '{window_size}' {flink_unit})"
+        window_expr = f"TUMBLE(`proc_time`, INTERVAL '{window_size}' {flink_unit})"
+        start_expr = f"TUMBLE_START(`proc_time`, INTERVAL '{window_size}' {flink_unit})"
+        end_expr = f"TUMBLE_END(`proc_time`, INTERVAL '{window_size}' {flink_unit})"
     else:
         step = sliding_step or 1
-        window_expr = f"HOP(`event_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
-        start_expr = f"HOP_START(`event_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
-        end_expr = f"HOP_END(`event_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
+        window_expr = f"HOP(`proc_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
+        start_expr = f"HOP_START(`proc_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
+        end_expr = f"HOP_END(`proc_time`, INTERVAL '{step}' {flink_unit}, INTERVAL '{window_size}' {flink_unit})"
 
     return (
         f"INSERT INTO KafkaSink\n"
@@ -134,7 +135,8 @@ def _source_ddl_full(topic: str, fields: dict[str, str]) -> str:
         f"  `key` STRING,\n"
         f"{col_lines}\n"
         f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
-        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND,\n"
+        f"  `proc_time` AS PROCTIME()\n"
         f") WITH (\n"
         f"  'connector' = 'kafka',\n"
         f"  'topic' = '{topic}',\n"
@@ -172,7 +174,8 @@ def get_source_ddl_display(fields: dict[str, str]) -> str:
         f"  `key` STRING,\n"
         f"{col_lines}\n"
         f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
-        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND,\n"
+        f"  `proc_time` AS PROCTIME()\n"
         f")"
     )
 
@@ -187,7 +190,8 @@ def _source_ddl_named(topic: str, fields: dict[str, str], table_name: str) -> st
         f"  `key` STRING,\n"
         f"{col_lines}\n"
         f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
-        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND,\n"
+        f"  `proc_time` AS PROCTIME()\n"
         f") WITH (\n"
         f"  'connector' = 'kafka',\n"
         f"  'topic' = '{topic}',\n"
@@ -207,7 +211,8 @@ def get_collection_ddl_display(table_name: str, fields: dict[str, str]) -> str:
         f"  `key` STRING,\n"
         f"{col_lines}\n"
         f"  `event_time` AS TO_TIMESTAMP_LTZ(UNIX_TIMESTAMP() * 1000, 3),\n"
-        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND\n"
+        f"  WATERMARK FOR `event_time` AS `event_time` - INTERVAL '5' SECOND,\n"
+        f"  `proc_time` AS PROCTIME()\n"
         f")"
     )
 
