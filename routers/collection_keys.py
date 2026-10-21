@@ -73,7 +73,9 @@ async def get_key_statistics(
         """
 
         daily_results = session.execute(daily_query, [key])
-        day_counts = Counter(row.day.strftime("%Y-%m-%d") for row in daily_results if row.day)
+        # NOTE: the driver decodes CQL DATE to cassandra.util.Date (driver 3.29),
+        # which has no strftime — but str() already yields ISO YYYY-MM-DD.
+        day_counts = Counter(str(row.day) for row in daily_results if row.day)
         daily_counts = [
             {"date": day, "record_count": count} for day, count in sorted(day_counts.items())
         ]

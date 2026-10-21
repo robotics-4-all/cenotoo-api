@@ -56,3 +56,46 @@ class TestGetKeyStatistics:
 
         resp = client.get(self._url(sample_project_id, sample_collection_id, "key1"))
         assert resp.status_code == 500
+
+    def test_daily_breakdown_with_driver_date(
+        self,
+        mock_org,
+        mock_proj,
+        mock_coll,
+        mock_session,
+        client,
+        sample_project_id,
+        sample_collection_id,
+    ):
+        """Daily breakdown must handle cassandra.util.Date (no strftime).
+
+        The driver decodes CQL DATE to cassandra.util.Date, which has no
+        strftime — str() already yields ISO YYYY-MM-DD.
+        """
+        from datetime import datetime
+
+        from cassandra.util import Date
+
+        mock_org.return_value = MagicMock(organization_name="org")
+        mock_proj.return_value = MagicMock(project_name="proj")
+        mock_coll.return_value = MagicMock(collection_name="coll")
+
+        DayRow = namedtuple("DayRow", ["day"])
+        stats = StatsRow(
+            record_count=3,
+            first_timestamp=datetime(2026, 10, 21, 12, 0, 0),
+            last_timestamp=datetime(2026, 10, 21, 12, 5, 0),
+        )
+        mock_session.execute.side_effect = [
+            MagicMock(one=MagicMock(return_value=stats)),
+            [DayRow(Date(20720)), DayRow(Date(20720)), DayRow(Date(20721))],
+        ]
+
+        resp = client.get(self._url(sample_project_id, sample_collection_id, "key1"))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_records"] == 3
+        assert {d["date"]: d["record_count"] for d in body["daily_breakdown"]} == {
+            "2026-09-24": 2,
+            "2026-09-25": 1,
+        }
